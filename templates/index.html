@@ -6,146 +6,181 @@
     <title>My Telegram Mini App</title>
     <style>
         body {
-            font-family: sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
             display: flex;
             flex-direction: column;
             justify-content: center;
             align-items: center;
             min-height: 100vh;
             margin: 0;
-            background-color: #f0f0f0;
-            color: #333;
+            background-color: var(--tg-theme-bg-color, #f0f0f0);
+            color: var(--tg-theme-text-color, #333);
             text-align: center;
+            padding: 20px;
+            box-sizing: border-box;
         }
         .container {
-            background-color: #fff;
+            background-color: var(--tg-theme-secondary-bg-color, #fff);
             padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
             max-width: 400px;
             width: 90%;
         }
         h1 {
-            color: #007bff;
+            color: var(--tg-theme-link-color, #007bff);
             margin-bottom: 20px;
         }
         p {
             margin-bottom: 10px;
         }
+        #user-info {
+            margin: 20px 0;
+            text-align: left;
+            background-color: var(--tg-theme-bg-color, #f8f9fa);
+            padding: 15px;
+            border-radius: 8px;
+        }
         #statusMessage {
             margin-top: 20px;
             font-weight: bold;
+            padding: 10px;
+            border-radius: 6px;
         }
         .loading {
-            color: #6c757d;
+            color: var(--tg-theme-hint-color, #6c757d);
+            background-color: var(--tg-theme-secondary-bg-color, #f8f9fa);
         }
         .success {
-            color: #28a745;
+            color: var(--tg-theme-button-text-color, #fff);
+            background-color: var(--tg-theme-button-color, #28a745);
         }
         .error {
-            color: #dc3545;
+            color: var(--tg-theme-button-text-color, #fff);
+            background-color: var(--tg-theme-danger-color, #dc3545);
+        }
+        .hidden {
+            display: none;
         }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>Welcome to Your Mini App!</h1>
-        <p>Connecting to backend...</p>
+        <div id="telegram-notice" class="hidden">
+            <p>Please open this page within Telegram to use all features.</p>
+        </div>
+        
         <div id="user-info">
             <p><strong>Telegram User ID:</strong> <span id="userId">Loading...</span></p>
             <p><strong>First Name:</strong> <span id="firstName">Loading...</span></p>
             <p><strong>Username:</strong> <span id="username">Loading...</span></p>
         </div>
-        <p id="statusMessage" class="loading">Sending user data...</p>
+        
+        <div id="statusMessage" class="loading">Initializing connection...</div>
     </div>
 
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script>
+        // DOM elements
         const userIdSpan = document.getElementById('userId');
         const firstNameSpan = document.getElementById('firstName');
         const usernameSpan = document.getElementById('username');
         const statusMessage = document.getElementById('statusMessage');
+        const telegramNotice = document.getElementById('telegram-notice');
+        const userInfoDiv = document.getElementById('user-info');
 
-        // --- DEBUG ALERTS (REMOVE IN PRODUCTION) ---
-        alert('JS in index.html is running!');
-
-        // Check if Telegram Web App is ready and available
-        if (Telegram && Telegram.WebApp) {
-            alert('Telegram WebApp object found!'); // DEBUG
-            Telegram.WebApp.ready();
-            Telegram.WebApp.expand(); // Optional: expand the mini app to full screen
-
-            const initData = Telegram.WebApp.initData;
-            const user = Telegram.WebApp.initDataUnsafe.user; // Parsed user object
-
-            alert('initData content: ' + (initData ? initData.substring(0, 50) + '...' : 'empty/null')); // DEBUG: Show part of initData
-            alert('User ID from initDataUnsafe: ' + (user ? user.id : 'User object missing')); // DEBUG: Check user ID
-
-            if (user && initData) { // Ensure both user and initData are present
-                // Display user info immediately from initDataUnsafe
-                userIdSpan.textContent = user.id || 'N/A';
-                firstNameSpan.textContent = user.first_name || 'N/A';
-                usernameSpan.textContent = user.username || 'N/A';
-
-                // Prepare data to send to your Flask backend
-                // This payload is what your Flask's get_user_info expects in request.json
-                const payload = {
-                    user: user // Sending the user object directly
-                };
-
-                // Send data to your Flask backend
-                fetch('/get_user_info', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        // THIS IS THE CRITICAL HEADER!
-                        'X-Telegram-Init-Data': initData // Send the raw initData from Telegram
-                    },
-                    body: JSON.stringify(payload)
-                })
-                .then(response => {
-                    if (!response.ok) {
-                        // If the response is not OK (e.g., 401, 500), read error details
-                        return response.json().then(errorData => {
-                            throw new Error(errorData.error || `HTTP error! Status: ${response.status}`);
-                        }).catch(() => {
-                            // If response is not JSON, try to read as text (e.g., HTML error page)
-                            return response.text().then(text => {
-                                throw new Error(`HTTP error! Status: ${response.status}. Raw response: ${text.substring(0, 200)}...`);
-                            });
-                        });
-                    }
-                    return response.json();
-                })
-                .then(data => {
-                    if (data.status === 'success') {
-                        statusMessage.textContent = 'User data sent and processed successfully!';
-                        statusMessage.className = 'success';
-                        console.log('Backend response:', data);
-                        // You can update UI further or navigate
-                    } else {
-                        statusMessage.textContent = `Error: ${data.error || 'Unknown error from backend'}`;
-                        statusMessage.className = 'error';
-                        console.error('Backend reported error:', data);
-                    }
-                })
-                .catch(error => {
-                    statusMessage.textContent = `Client-side error: ${error.message}`;
-                    statusMessage.className = 'error';
-                    console.error('Fetch error:', error);
-                });
-
+        // Main initialization function
+        function initializeApp() {
+            if (window.Telegram && Telegram.WebApp) {
+                // We're in Telegram WebApp environment
+                Telegram.WebApp.ready();
+                Telegram.WebApp.expand();
+                
+                const initData = Telegram.WebApp.initData;
+                const user = Telegram.WebApp.initDataUnsafe.user;
+                
+                if (user && initData) {
+                    updateUIWithUserData(user);
+                    sendUserDataToBackend(user, initData);
+                } else {
+                    showError('Telegram user data not available');
+                    console.error('Telegram.WebApp.initDataUnsafe.user:', user);
+                    console.error('Telegram.WebApp.initData:', initData);
+                }
             } else {
-                statusMessage.textContent = 'Error: Telegram user data or initData not available.';
-                statusMessage.className = 'error';
-                console.error('Telegram.WebApp.initDataUnsafe.user or initData is missing.');
+                // Not in Telegram environment
+                showTelegramNotice();
+                console.warn('Telegram.WebApp not detected - running in standalone mode');
             }
-
-        } else {
-            statusMessage.textContent = 'Telegram Web App environment not detected. Please open this page within Telegram.';
-            statusMessage.className = 'error';
-            console.error('Telegram.WebApp object not found. This page is not running in a Telegram Mini App context.');
         }
+
+        function updateUIWithUserData(user) {
+            userIdSpan.textContent = user.id || 'N/A';
+            firstNameSpan.textContent = user.first_name || 'N/A';
+            usernameSpan.textContent = user.username ? '@' + user.username : 'N/A';
+            
+            // Apply Telegram theme colors if available
+            if (Telegram.WebApp.colorScheme) {
+                document.body.style.setProperty('--tg-theme-bg-color', Telegram.WebApp.themeParams.bg_color);
+                document.body.style.setProperty('--tg-theme-text-color', Telegram.WebApp.themeParams.text_color);
+                document.body.style.setProperty('--tg-theme-link-color', Telegram.WebApp.themeParams.link_color);
+                document.body.style.setProperty('--tg-theme-button-color', Telegram.WebApp.themeParams.button_color);
+                document.body.style.setProperty('--tg-theme-button-text-color', Telegram.WebApp.themeParams.button_text_color);
+            }
+        }
+
+        function sendUserDataToBackend(user, initData) {
+            statusMessage.textContent = 'Connecting to server...';
+            statusMessage.className = 'loading';
+            
+            fetch('/get_user_info', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Telegram-Init-Data': initData
+                },
+                body: JSON.stringify({ user })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(err => {
+                        throw new Error(err.error || `Server error: ${response.status}`);
+                    }).catch(() => {
+                        throw new Error(`Server error: ${response.status}`);
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.status === 'success') {
+                    statusMessage.textContent = 'Connected successfully!';
+                    statusMessage.className = 'success';
+                    console.log('Server response:', data);
+                } else {
+                    throw new Error(data.error || 'Unknown server error');
+                }
+            })
+            .catch(error => {
+                showError(error.message);
+                console.error('Error:', error);
+            });
+        }
+
+        function showTelegramNotice() {
+            telegramNotice.classList.remove('hidden');
+            userInfoDiv.style.display = 'none';
+            statusMessage.textContent = 'This app works best within Telegram';
+            statusMessage.className = 'loading';
+        }
+
+        function showError(message) {
+            statusMessage.textContent = message;
+            statusMessage.className = 'error';
+        }
+
+        // Initialize the app when DOM is loaded
+        document.addEventListener('DOMContentLoaded', initializeApp);
     </script>
 </body>
 </html>
