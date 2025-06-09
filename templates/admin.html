@@ -22,14 +22,14 @@
 
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
         <div class="container-fluid">
-            <a class="navbar-brand" href="/admin/users">Admin Dashboard</a>
+            <a class="navbar-brand" href="/admin">Admin Dashboard</a>
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
                 <span class="navbar-toggler-icon"></span>
             </button>
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav me-auto mb-2 mb-lg-0">
                     <li class="nav-item">
-                        <a class="nav-link active" aria-current="page" href="/admin/users">Users</a>
+                        <a class="nav-link active" aria-current="page" href="/admin">Users</a>
                     </li>
                     </ul>
                 <span class="navbar-text">
@@ -107,7 +107,7 @@
                     </tr>
                 </thead>
                 <tbody id="userTableBody">
-                    </tbody>
+                </tbody>
             </table>
         </div>
 
@@ -275,10 +275,18 @@
                 document.getElementById('detailLastSeen').textContent = userData.last_seen ? new Date(userData.last_seen).toLocaleString() : 'N/A';
 
                 // Populate sessions
+                const noSessionsMessage = document.getElementById('noSessionsMessage');
                 const sessionsList = document.getElementById('detailSessionsList');
-                sessionsList.innerHTML = ''; // Clear previous
+                
+                // Clear all dynamically added sessions, but keep the 'noSessionsMessage' element
+                Array.from(sessionsList.children).forEach(child => {
+                    if (child.id !== 'noSessionsMessage') {
+                        child.remove();
+                    }
+                });
+
                 if (sessionsData.length > 0) {
-                    document.getElementById('noSessionsMessage').style.display = 'none';
+                    noSessionsMessage.style.display = 'none'; // Hide the "No recent sessions" message
                     sessionsData.forEach(session => {
                         const li = document.createElement('li');
                         li.className = 'list-group-item';
@@ -292,14 +300,22 @@
                         sessionsList.appendChild(li);
                     });
                 } else {
-                    document.getElementById('noSessionsMessage').style.display = 'block';
+                    noSessionsMessage.style.display = 'block'; // Show the "No recent sessions" message
                 }
 
                 // Populate events
+                const noEventsMessage = document.getElementById('noEventsMessage');
                 const eventsList = document.getElementById('detailEventsList');
-                eventsList.innerHTML = ''; // Clear previous
+                
+                // Clear all dynamically added events, but keep the 'noEventsMessage' element
+                Array.from(eventsList.children).forEach(child => {
+                    if (child.id !== 'noEventsMessage') {
+                        child.remove();
+                    }
+                });
+
                 if (eventsData.length > 0) {
-                    document.getElementById('noEventsMessage').style.display = 'none';
+                    noEventsMessage.style.display = 'none'; // Hide the "No recent events" message
                     eventsData.forEach(event => {
                         const li = document.createElement('li');
                         li.className = 'list-group-item';
@@ -311,7 +327,7 @@
                         eventsList.appendChild(li);
                     });
                 } else {
-                    document.getElementById('noEventsMessage').style.display = 'block';
+                    noEventsMessage.style.display = 'block'; // Show the "No recent events" message
                 }
                 
                 // Set the user ID for the delete button
