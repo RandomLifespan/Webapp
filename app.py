@@ -102,15 +102,20 @@ def validate_telegram_data(init_data):
 # Middleware to check Telegram authentication
 @app.before_request
 def check_telegram_authentication():
-    # Allow 'index' and 'static' endpoints without Telegram authentication
-    if request.endpoint in ['index', 'static']:
-        return
-
-    # For analytics and admin endpoints, if you want them accessible from a browser
-    # without full Telegram auth, you'd need to add their endpoint names here,
-    # or implement a different authentication mechanism for them (like the admin basic auth)
-    # For now, let's assume all endpoints except index/static need Telegram auth.
+    # Define endpoints that DO NOT require Telegram authentication
+    # Add 'admin_users' and all analytics endpoints to this list
+    exempt_endpoints = [
+        'index', 'static', 
+        'admin_users', 
+        'user_count', 'user_growth', 'top_events' # Analytics endpoints
+    ]
     
+    # Get the name of the endpoint Flask is trying to serve
+    # request.endpoint is None for 404s, but here we expect valid endpoints
+    if request.endpoint in exempt_endpoints:
+        return # Skip Telegram authentication for these endpoints
+
+    # All other endpoints require Telegram authentication
     telegram_init_data = request.headers.get('X-Telegram-Init-Data')
     
     if not telegram_init_data:
@@ -219,6 +224,7 @@ def get_user_info():
         return jsonify({'error': str(e)}), 500
 
 # Analytics Endpoints
+# These endpoints will now be exempt from Telegram auth by the updated before_request
 @app.route('/analytics/users/count')
 def user_count():
     try:
@@ -267,7 +273,7 @@ def top_events():
 
 # Admin protection middleware
 def require_admin_auth(f):
-    @wraps(f) # Add this line
+    @wraps(f)
     def decorated(*args, **kwargs):
         auth = request.authorization
         if not auth or not check_admin_credentials(auth.username, auth.password):
@@ -279,24 +285,21 @@ def require_admin_auth(f):
 
 def check_admin_credentials(username, password):
     # In production, use proper password hashing and environment variables
+    # On Railway, you'll set ADMIN_USERNAME and ADMIN_PASSWORD in your project variables
     correct_username = os.environ.get('ADMIN_USERNAME', 'admin')
     correct_password = os.environ.get('ADMIN_PASSWORD', 'securepassword')
     return username == correct_username and password == correct_password
 
 @app.route('/admin/users')
-@require_admin_auth
+@require_admin_auth # This decorator will now correctly handle authentication
 def admin_users():
     try:
         conn = get_db_connection()
-        # The database query remains the same
         users_raw = conn.execute('SELECT * FROM users ORDER BY last_seen DESC LIMIT 100').fetchall()
         conn.close()
-        # Convert list of Row objects to list of dictionaries
         users = [dict(user) for user in users_raw]
-        # Instead of jsonify, render the HTML template
         return render_template('admin.html', users=users)
     except Exception as e:
-        # You could even render an error template here
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
