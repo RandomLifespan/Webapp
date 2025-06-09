@@ -164,6 +164,47 @@
 
         let currentUsers = []; // Store the currently displayed users
 
+        // --- NEW: Store Basic Auth credentials ---
+        let adminUsername = '';
+        let adminPassword = '';
+
+        // Function to encode credentials for Basic Auth header
+        function getAuthHeaders() {
+            if (!adminUsername || !adminPassword) {
+                // If credentials are not set, try to get them (e.g., first load)
+                // This will trigger the browser's native popup
+                // For subsequent calls, we expect them to be set.
+                return {};
+            }
+            const credentials = btoa(`${adminUsername}:${adminPassword}`);
+            return {
+                'Authorization': `Basic ${credentials}`
+            };
+        }
+
+        // --- NEW: Intercept fetch requests to add Auth Headers ---
+        // We'll create a wrapper around the native fetch
+        const originalFetch = window.fetch;
+        window.fetch = async function(url, options = {}) {
+            const authHeaders = getAuthHeaders();
+            options.headers = {
+                ...options.headers, // Keep existing headers
+                ...authHeaders      // Add Authorization header
+            };
+            const response = await originalFetch(url, options);
+
+            // If a 401 is received, it means our stored credentials might be invalid or expired.
+            // This is where you could prompt the user again, or redirect to a login page.
+            if (response.status === 401) {
+                console.error("401 Unauthorized received. Stored credentials might be invalid or expired.");
+                // OPTIONAL: You could add logic here to re-prompt the user or reload the page
+                // to trigger the browser's native Basic Auth prompt again.
+                // For simplicity, we'll let the existing error handling catch it.
+            }
+            return response;
+        };
+
+
         // Function to fetch and display overview data
         async function fetchOverviewData() {
             // Set initial loading states
@@ -173,31 +214,30 @@
 
             try {
                 // Fetch user count and active users
-                const userCountRes = await fetch('/analytics/users/count');
+                const userCountRes = await fetch('/analytics/users/count'); // fetch() is now wrapped
                 if (userCountRes.ok) {
                     const userCountData = await userCountRes.json();
                     document.getElementById('totalUsers').textContent = userCountData.total_users || 0;
                     document.getElementById('activeToday').textContent = userCountData.active_today || 0;
                 } else {
-                    const errorDetails = await userCountRes.text(); // Read as text to avoid JSON parsing errors
+                    const errorDetails = await userCountRes.text();
                     console.error(`Error fetching user count: ${userCountRes.status} ${userCountRes.statusText}. Details: ${errorDetails}`);
                     document.getElementById('totalUsers').textContent = `Error (${userCountRes.status})`;
                     document.getElementById('activeToday').textContent = `Error (${userCountRes.status})`;
                 }
 
                 // Fetch top events
-                const topEventsRes = await fetch('/analytics/events/top');
+                const topEventsRes = await fetch('/analytics/events/top'); // fetch() is now wrapped
                 if (topEventsRes.ok) {
                     const topEventsData = await topEventsRes.json();
                     document.getElementById('topEventType').textContent = topEventsData.length > 0 ? topEventsData[0].event_type : 'N/A';
                 } else {
-                    const errorDetails = await topEventsRes.text(); // Read as text
+                    const errorDetails = await topEventsRes.text();
                     console.error(`Error fetching top events: ${topEventsRes.status} ${topEventsRes.statusText}. Details: ${errorDetails}`);
                     document.getElementById('topEventType').textContent = `Error (${topEventsRes.status})`;
                 }
 
             } catch (error) {
-                // This catch block handles network errors or errors that occur before a valid HTTP response is even received
                 console.error('Network or unhandled error fetching overview data:', error);
                 document.getElementById('totalUsers').textContent = 'Error (Client)';
                 document.getElementById('activeToday').textContent = 'Error (Client)';
@@ -210,13 +250,13 @@
         async function fetchAndDisplayUsers(query = '', sort = 'recent') {
             userTableBody.innerHTML = `<tr><td colspan="8" class="text-center">Loading users...</td></tr>`;
             try {
-                const response = await fetch(`/admin/users?query=${encodeURIComponent(query)}&sort=${sort}`);
+                const response = await fetch(`/admin/users?query=${encodeURIComponent(query)}&sort=${sort}`); // fetch() is now wrapped
                 if (!response.ok) {
-                    const errorText = await response.text(); // Read error response as text
+                    const errorText = await response.text();
                     throw new Error(`HTTP error! Status: ${response.status}. Details: ${errorText}`);
                 }
                 const users = await response.json();
-                currentUsers = users; // Store fetched users
+                currentUsers = users;
                 renderUserTable(users);
             } catch (error) {
                 console.error('Error fetching users:', error);
@@ -254,7 +294,7 @@
         // Function to attach event listeners to "View" buttons
         function attachViewDetailsListeners() {
             document.querySelectorAll('.view-details-btn').forEach(button => {
-                button.removeEventListener('click', handleViewDetailsClick); // Prevent duplicate listeners
+                button.removeEventListener('click', handleViewDetailsClick);
                 button.addEventListener('click', handleViewDetailsClick);
             });
         }
@@ -268,7 +308,7 @@
         async function fetchUserDetails(userId) {
             try {
                 // Fetch user profile
-                const userRes = await fetch(`/admin/user/${userId}`);
+                const userRes = await fetch(`/admin/user/${userId}`); // fetch() is now wrapped
                 if (!userRes.ok) {
                     const errorText = await userRes.text();
                     throw new Error(`User not found or API error: ${userRes.status}. Details: ${errorText}`);
@@ -276,7 +316,7 @@
                 const userData = await userRes.json();
 
                 // Fetch user sessions
-                const sessionsRes = await fetch(`/admin/user/${userId}/sessions`);
+                const sessionsRes = await fetch(`/admin/user/${userId}/sessions`); // fetch() is now wrapped
                 if (!sessionsRes.ok) {
                     const errorText = await sessionsRes.text();
                     throw new Error(`Sessions API error: ${sessionsRes.status}. Details: ${errorText}`);
@@ -284,7 +324,7 @@
                 const sessionsData = await sessionsRes.json();
 
                 // Fetch user events
-                const eventsRes = await fetch(`/admin/user/${userId}/events`);
+                const eventsRes = await fetch(`/admin/user/${userId}/events`); // fetch() is now wrapped
                 if (!eventsRes.ok) {
                     const errorText = await eventsRes.text();
                     throw new Error(`Events API error: ${eventsRes.status}. Details: ${errorText}`);
@@ -307,7 +347,6 @@
                 const noSessionsMessage = document.getElementById('noSessionsMessage');
                 const sessionsList = document.getElementById('detailSessionsList');
                 
-                // Clear all dynamically added sessions, but keep the 'noSessionsMessage' element
                 Array.from(sessionsList.children).forEach(child => {
                     if (child.id !== 'noSessionsMessage') {
                         child.remove();
@@ -315,7 +354,7 @@
                 });
 
                 if (sessionsData.length > 0) {
-                    noSessionsMessage.style.display = 'none'; // Hide the "No recent sessions" message
+                    noSessionsMessage.style.display = 'none';
                     sessionsData.forEach(session => {
                         const li = document.createElement('li');
                         li.className = 'list-group-item';
@@ -329,14 +368,13 @@
                         sessionsList.appendChild(li);
                     });
                 } else {
-                    noSessionsMessage.style.display = 'block'; // Show the "No recent sessions" message
+                    noSessionsMessage.style.display = 'block';
                 }
 
                 // Populate events
                 const noEventsMessage = document.getElementById('noEventsMessage');
                 const eventsList = document.getElementById('detailEventsList');
                 
-                // Clear all dynamically added events, but keep the 'noEventsMessage' element
                 Array.from(eventsList.children).forEach(child => {
                     if (child.id !== 'noEventsMessage') {
                         child.remove();
@@ -344,7 +382,7 @@
                 });
 
                 if (eventsData.length > 0) {
-                    noEventsMessage.style.display = 'none'; // Hide the "No recent events" message
+                    noEventsMessage.style.display = 'none';
                     eventsData.forEach(event => {
                         const li = document.createElement('li');
                         li.className = 'list-group-item';
@@ -356,10 +394,9 @@
                         eventsList.appendChild(li);
                     });
                 } else {
-                    noEventsMessage.style.display = 'block'; // Show the "No recent events" message
+                    noEventsMessage.style.display = 'block';
                 }
                 
-                // Set the user ID for the delete button
                 deleteUserButton.dataset.userIdToDelete = userId;
 
                 userDetailModal.show();
@@ -390,7 +427,7 @@
                 try {
                     const response = await fetch(`/admin/user/${userIdToDelete}`, {
                         method: 'DELETE'
-                    });
+                    }); // fetch() is now wrapped
                     if (!response.ok) {
                         const errorText = await response.text();
                         throw new Error(`HTTP error! status: ${response.status}. Details: ${errorText}`);
@@ -415,9 +452,73 @@
 
         // Initial load
         document.addEventListener('DOMContentLoaded', () => {
-            fetchOverviewData();
-            fetchAndDisplayUsers();
+            // Check if credentials are in sessionStorage (from a previous successful login)
+            const storedUsername = sessionStorage.getItem('adminUsername');
+            const storedPassword = sessionStorage.getItem('adminPassword');
+
+            if (storedUsername && storedPassword) {
+                adminUsername = storedUsername;
+                adminPassword = storedPassword;
+                console.log("Credentials retrieved from sessionStorage.");
+                fetchOverviewData();
+                fetchAndDisplayUsers();
+            } else {
+                // If no stored credentials, the first fetch will trigger the browser's native prompt
+                // After the user enters credentials, we need to capture them.
+                // This is the tricky part with native Basic Auth.
+                // A common pattern is to just let the browser handle it for the initial load,
+                // and then if a sub-request fails, you might need to re-prompt or handle it
+                // as an expired session.
+                // For this scenario, we'll assume the initial page load (admin.html)
+                // has been authenticated, and the browser will prompt for the first time.
+                // We'll then rely on the *browser's behavior* to send the Authorization header
+                // for the initial admin.html request.
+                // When you make subsequent AJAX calls, the `window.fetch` override will inject them.
+
+                // If the user *just* loaded the page and entered credentials,
+                // the browser *should* send them with subsequent fetches within that session.
+                // But for robust handling, we would ideally capture them programmatically.
+                // However, since we can't programmatically read basic auth headers from
+                // the initial request on the client side, we'll let the browser handle
+                // the initial authentication for the HTML page, and then the fetches
+                // should inherit that, or fail if not, triggering the prompt again.
+
+                // A better, but more complex, solution would be to have a dedicated login form
+                // where you submit credentials, receive a session token, and use that token.
+                // For basic auth, we often rely on the browser's persistence.
+
+                // Let's modify the initial load to be robust:
+                // We will perform a dummy fetch to capture the credentials if the browser
+                // has them, or let the browser prompt.
+                console.log("No stored credentials. Attempting to fetch with browser's default auth.");
+                fetchOverviewData(); // Will trigger auth if not already logged in
+                fetchAndDisplayUsers(); // Will trigger auth if not already logged in
+            }
         });
+
+
+        // --- NEW: Intercepting XMLHttpRequest (if you were using it) ---
+        // If you're only using `fetch`, the above `window.fetch` override is enough.
+        // If you have older code using XMLHttpRequest, you'd need a similar override:
+        /*
+        const originalOpen = XMLHttpRequest.prototype.open;
+        XMLHttpRequest.prototype.open = function(method, url, async, user, password) {
+            this._url = url; // Store URL for later
+            if (user && password) { // If credentials are explicitly passed
+                this._authSet = true;
+                this.setRequestHeader('Authorization', `Basic ${btoa(`${user}:${password}`)}`);
+            } else { // Use stored global credentials if not explicitly passed
+                const authHeaders = getAuthHeaders();
+                if (authHeaders['Authorization']) {
+                    this.setRequestHeader('Authorization', authHeaders['Authorization']);
+                }
+            }
+            originalOpen.apply(this, arguments);
+        };
+        */
+        // Note: For basic auth, browsers usually handle this automatically for XMLHttpRequest too,
+        // but explicit setting is safer if you store them.
+
     </script>
 </body>
 </html>
