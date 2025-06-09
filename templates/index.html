@@ -265,8 +265,8 @@
                     `${user.first_name || ''} ${user.last_name || ''}`.trim() || 'Not available';
                 document.getElementById('username').textContent = user.username ? `@${user.username}` : 'Not set';
                 
-                // Send data to backend
-                sendToBackend(user);
+                // Send data to backend with Telegram initData
+                sendToBackend(user, tg.initData);
             } else {
                 document.getElementById('user-id').textContent = 'Not available';
                 document.getElementById('user-name').textContent = 'Please open in Telegram';
@@ -275,16 +275,25 @@
         }
 
         // Function to send data to backend
-        function sendToBackend(user) {
+        function sendToBackend(user, initData) {
             fetch('/get_user_info', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    'X-Telegram-Init-Data': initData, // Crucial: Send the initData
+                    // The X-Telegram-Hash header is no longer needed separately
+                    // as the hash is part of initData itself for server-side validation.
                 },
                 body: JSON.stringify({ user })
             })
             .then(response => {
-                if (!response.ok) throw new Error('Network response was not ok');
+                if (!response.ok) {
+                    // Check for specific error status if needed
+                    if (response.status === 401) {
+                        console.error('Authentication Error: Unauthorized access to backend.');
+                    }
+                    throw new Error(`Network response was not ok: ${response.statusText}`);
+                }
                 return response.json();
             })
             .then(data => {
@@ -294,8 +303,6 @@
                 console.error('Error saving to backend:', error);
             });
         }
-
-       
 
         // Close button handler
         document.getElementById('close-btn').addEventListener('click', () => {
