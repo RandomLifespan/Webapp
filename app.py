@@ -197,7 +197,6 @@ def check_telegram_authentication():
         return jsonify({'error': 'Unauthorized: Missing X-Telegram-Init-Data header'}), 401
 
     if not validate_telegram_data(telegram_init_data):
-        print(f"Invalid Telegram Init Data for route: {request.path}")
         return jsonify({'error': 'Unauthorized: Invalid Telegram data'}), 401
     
     # If validation passes, user data is in g.telegram_user
