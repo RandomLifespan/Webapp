@@ -2,7 +2,7 @@ from functools import wraps
 from flask import Flask, request, jsonify, render_template, redirect, url_for, g
 import os
 import psycopg2
-from psycopg2 import extras
+from psycopg2 import extras # Needed for RealDictCursor
 from datetime import datetime, timedelta
 import hashlib
 import hmac
@@ -21,73 +21,80 @@ def get_db_connection():
     try:
         db_url = os.environ.get('DATABASE_URL')
         if not db_url:
+            print("DATABASE_URL environment variable is not set. Cannot connect to DB.")
             raise ValueError("DATABASE_URL environment variable is not set.")
 
         conn = psycopg2.connect(db_url)
         return conn
     except Exception as e:
         print(f"Error connecting to PostgreSQL database: {e}")
+        # Re-raise to ensure the error propagates and is caught by the route's try-except
         raise
 
 def init_db():
-    with app.app_context():
-        conn = None
-        try:
-            conn = get_db_connection()
-            cur = conn.cursor()
-            
-            cur.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                id SERIAL PRIMARY KEY,
-                user_id BIGINT NOT NULL UNIQUE,
-                first_name TEXT,
-                last_name TEXT,
-                username TEXT,
-                language_code TEXT,
-                is_premium BOOLEAN,
-                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
-                last_seen TIMESTAMP WITHOUT TIME ZONE NOT NULL,
-                interactions INTEGER DEFAULT 1
-            );
-            ''')
-            
-            cur.execute('''
-            CREATE TABLE IF NOT EXISTS user_sessions (
-                session_id TEXT PRIMARY KEY,
-                user_id BIGINT NOT NULL,
-                ip_address TEXT,
-                user_agent TEXT,
-                referrer TEXT,
-                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
-                last_activity TIMESTAMP WITHOUT TIME ZONE NOT NULL,
-                FOREIGN KEY (user_id) REFERENCES users (user_id) ON DELETE CASCADE
-            );
-            ''')
-            
-            cur.execute('''
-            CREATE TABLE IF NOT EXISTS user_events (
-                event_id SERIAL PRIMARY KEY,
-                user_id BIGINT NOT NULL,
-                event_type TEXT NOT NULL,
-                event_data JSONB, -- Changed to JSONB for better JSON storage
-                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
-                FOREIGN KEY (user_id) REFERENCES users (user_id) ON DELETE CASCADE
-            );
-            ''')
-            conn.commit()
-            print("PostgreSQL tables checked/created successfully.")
-        except Exception as e:
-            print(f"Error initializing PostgreSQL database: {e}")
-            if conn:
-                conn.rollback()
-            raise
-        finally:
-            if conn:
-                conn.close()
+    # Use app.app_context() only if you are calling this outside of a request context
+    # For a simple script, it's fine, but typically handled by your web server
+    # when the app starts.
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        cur.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY,
+            user_id BIGINT NOT NULL UNIQUE,
+            first_name TEXT,
+            last_name TEXT,
+            username TEXT,
+            language_code TEXT,
+            is_premium BOOLEAN,
+            created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+            last_seen TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+            interactions INTEGER DEFAULT 1
+        );
+        ''')
+        
+        cur.execute('''
+        CREATE TABLE IF NOT EXISTS user_sessions (
+            session_id TEXT PRIMARY KEY,
+            user_id BIGINT NOT NULL,
+            ip_address TEXT,
+            user_agent TEXT,
+            referrer TEXT,
+            created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+            last_activity TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users (user_id) ON DELETE CASCADE
+        );
+        ''')
+        
+        cur.execute('''
+        CREATE TABLE IF NOT EXISTS user_events (
+            event_id SERIAL PRIMARY KEY,
+            user_id BIGINT NOT NULL,
+            event_type TEXT NOT NULL,
+            event_data JSONB,
+            created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users (user_id) ON DELETE CASCADE
+        );
+        ''')
+        conn.commit()
+        print("PostgreSQL tables checked/created successfully.")
+    except Exception as e:
+        print(f"Error initializing PostgreSQL database: {e}")
+        if conn:
+            conn.rollback()
+        # Re-raise the exception to indicate a critical startup failure
+        raise
+    finally:
+        if conn:
+            conn.close()
 
+# Call init_db during application startup
 init_db()
 
-# --- Security helper functions (remain largely the same) ---
+
+# --- Security helper functions ---
 def validate_telegram_data(init_data_raw):
     if not app.config['TELEGRAM_BOT_TOKEN']:
         print("TELEGRAM_BOT_TOKEN is not set in app.config!")
@@ -137,10 +144,18 @@ def validate_telegram_data(init_data_raw):
         except ValueError:
             print("Invalid auth_date format.")
             return False
+    
+    # Store user data in g for the request
+    user_data_json = params.get('user', [None])[0]
+    if user_data_json:
+        g.telegram_user = json.loads(user_data_json)
+    else:
+        g.telegram_user = None # Or a default empty dict if you prefer
+        print("Warning: Telegram init data missing 'user' object.")
 
     return True
 
-# --- Admin protection middleware (MOVED HERE) ---
+# --- Admin protection middleware ---
 def check_admin_credentials(username, password):
     correct_username = os.environ.get('ADMIN_USERNAME', 'admin')
     correct_password = os.environ.get('ADMIN_PASSWORD', 'securepassword')
@@ -151,6 +166,7 @@ def require_admin_auth(f):
     def decorated(*args, **kwargs):
         auth = request.authorization
         if not auth or not check_admin_credentials(auth.username, auth.password):
+            print(f"Admin auth failed for {request.path}") # Debug print
             return 'Could not verify your access level for that URL.\n' \
                    'You have to login with proper credentials', 401, \
                    {'WWW-Authenticate': 'Basic realm="Login Required"'}
@@ -160,47 +176,47 @@ def require_admin_auth(f):
 # --- Middleware for Telegram Authentication ---
 @app.before_request
 def check_telegram_authentication():
-    # Only exempt endpoints that don't need Telegram auth.
-    # Admin routes will use their own Basic Auth.
-    exempt_endpoints = [
-        'index', 'static', 'admin_users', 'user_count', 
-        'admin_panel',
-        'user_growth', 'top_events', 'get_user_profile', 
-        'get_user_sessions', 'get_user_events', 'delete_user_data'
-    ]
-    
-    if request.endpoint in exempt_endpoints:
-        return
+    # Define a list of URL path prefixes that should be exempt from Telegram authentication.
+    # All admin routes start with /admin or /analytics, so this should cover them.
+    # Also, static files (CSS/JS) are exempt.
+    exempt_prefixes = ['/admin', '/analytics', '/static']
 
+    for prefix in exempt_prefixes:
+        if request.path.startswith(prefix):
+            # This path is exempt from Telegram authentication.
+            # print(f"Exempting {request.path} from Telegram auth.") # Debug print
+            return None # Allow the request to proceed to the next handler/route
+
+    # If not exempt, proceed with Telegram authentication
     telegram_init_data = request.headers.get('X-Telegram-Init-Data')
     
     if not telegram_init_data:
+        print(f"Missing X-Telegram-Init-Data for non-exempt route: {request.path}")
         return jsonify({'error': 'Unauthorized: Missing X-Telegram-Init-Data header'}), 401
 
     if not validate_telegram_data(telegram_init_data):
+        print(f"Invalid Telegram Init Data for route: {request.path}")
         return jsonify({'error': 'Unauthorized: Invalid Telegram data'}), 401
     
-    return
+    # If validation passes, user data is in g.telegram_user
+    # You might want to log/update user here for every request, or just rely on /get_user_info
+    pass # Let the request proceed
+
 
 # --- Routes ---
-
-
 
 @app.route('/')
 def index():
     return render_template('index.html')
 
-
-
 @app.route('/get_user_info', methods=['POST'])
 def get_user_info():
-    data = request.json
+    # We expect g.telegram_user to be set by the before_request middleware
+    if not hasattr(g, 'telegram_user') or not g.telegram_user:
+        return jsonify({'error': 'Telegram user data not found in request context.'}), 400
+
+    user_data = g.telegram_user # Get user data from g object
     now = datetime.now()
-    
-    if not data or 'user' not in data:
-        return jsonify({'error': 'Invalid data: "user" key missing'}), 400
-    
-    user_data = data['user']
     
     conn = None
     try:
@@ -234,7 +250,7 @@ def get_user_info():
             user_data.get('is_premium', False),
             now,
             now,
-            now
+            now # last_seen for update
         ))
         
         session_id = hashlib.sha256(f"{user_data['id']}{now}{secrets.token_hex(8)}".encode()).hexdigest()
@@ -287,13 +303,14 @@ def get_user_info():
         if conn:
             conn.close()
 
-# --- Analytics Endpoints ---
+# --- Admin Panel Routes ---
 
 @app.route('/admin') # <--- This is the URL that will display admin.html
 @require_admin_auth
 def admin_panel():
     return render_template('admin.html')
 
+# --- Analytics Endpoints ---
 
 @app.route('/analytics/users/count')
 @require_admin_auth
@@ -301,14 +318,19 @@ def user_count():
     conn = None
     try:
         conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute('SELECT COUNT(*) FROM users')
-        total = cur.fetchone()[0]
+        # Use RealDictCursor for cleaner dictionary output
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) 
+        cur.execute('SELECT COUNT(*) AS total_users FROM users')
+        total_users_data = cur.fetchone()
+        total = total_users_data['total_users'] if total_users_data else 0
+
         cur.execute('''
-            SELECT COUNT(*) FROM users 
+            SELECT COUNT(*) AS active_today FROM users 
             WHERE DATE(last_seen) = CURRENT_DATE
         ''')
-        today = cur.fetchone()[0]
+        active_today_data = cur.fetchone()
+        today = active_today_data['active_today'] if active_today_data else 0
+
         return jsonify({'total_users': total, 'active_today': today})
     except Exception as e:
         print(f"Error in user_count: {e}")
