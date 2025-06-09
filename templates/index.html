@@ -1,302 +1,139 @@
 <!DOCTYPE html>
-
 <html lang="en">
-
 <head>
-
-    <meta charset="UTF-8">
-
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-    <title>My Telegram Mini App</title>
-
-    <style>
-
-        body {
-
-            font-family: sans-serif;
-
-            display: flex;
-
-            flex-direction: column;
-
-            justify-content: center;
-
-            align-items: center;
-
-            min-height: 100vh;
-
-            margin: 0;
-
-            background-color: #f0f0f0;
-
-            color: #333;
-
-            text-align: center;
-
-        }
-
-        .container {
-
-            background-color: #fff;
-
-            padding: 20px;
-
-            border-radius: 8px;
-
-            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-
-            max-width: 400px;
-
-            width: 90%;
-
-        }
-
-        h1 {
-
-            color: #007bff;
-
-            margin-bottom: 20px;
-
-        }
-
-        p {
-
-            margin-bottom: 10px;
-
-        }
-
-        #statusMessage {
-
-            margin-top: 20px;
-
-            font-weight: bold;
-
-        }
-
-        .loading {
-
-            color: #6c757d;
-
-        }
-
-        .success {
-
-            color: #28a745;
-
-        }
-
-        .error {
-
-            color: #dc3545;
-
-        }
-
-    </style>
-
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Telegram Mini App</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+            color: #333;
+            text-align: center;
+        }
+        .container {
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            max-width: 400px;
+            width: 90%;
+        }
+        h1 {
+            color: #007bff;
+            margin-bottom: 20px;
+        }
+        p {
+            margin-bottom: 10px;
+        }
+        #statusMessage {
+            margin-top: 20px;
+            font-weight: bold;
+        }
+        .loading {
+            color: #6c757d;
+        }
+        .success {
+            color: #28a745;
+        }
+        .error {
+            color: #dc3545;
+        }
+    </style>
 </head>
-
 <body>
-
-    <div class="container">
-
-        <h1>Welcome to Your Mini App!</h1>
-
-        <p>Connecting to backend...</p>
-
-        <div id="user-info">
-
-            <p><strong>Telegram User ID:</strong> <span id="userId">Loading...</span></p>
-
-            <p><strong>First Name:</strong> <span id="firstName">Loading...</span></p>
-
-            <p><strong>Username:</strong> <span id="username">Loading...</span></p>
-
-        </div>
-
-        <p id="statusMessage" class="loading">Sending user data...</p>
-
-    </div>
-
-
-
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
-
-    <script>
-
-        const userIdSpan = document.getElementById('userId');
-
-        const firstNameSpan = document.getElementById('firstName');
-
-        const usernameSpan = document.getElementById('username');
-
-        const statusMessage = document.getElementById('statusMessage');
-
-
-
-        // --- DEBUG ALERTS (REMOVE IN PRODUCTION) ---
-
-        alert('JS in index.html is running!');
-
-
-
-        // Check if Telegram Web App is ready and available
-
-        if (Telegram && Telegram.WebApp) {
-
-            alert('Telegram WebApp object found!'); // DEBUG
-
-            Telegram.WebApp.ready();
-
-            Telegram.WebApp.expand(); // Optional: expand the mini app to full screen
-
-
-
-            const initData = Telegram.WebApp.initData;
-
-            const user = Telegram.WebApp.initDataUnsafe.user; // Parsed user object
-
-
-
-            alert('initData content: ' + (initData ? initData.substring(0, 50) + '...' : 'empty/null')); // DEBUG: Show part of initData
-
-            alert('User ID from initDataUnsafe: ' + (user ? user.id : 'User object missing')); // DEBUG: Check user ID
-
-
-
-            if (user && initData) { // Ensure both user and initData are present
-
-                // Display user info immediately from initDataUnsafe
-
-                userIdSpan.textContent = user.id || 'N/A';
-
-                firstNameSpan.textContent = user.first_name || 'N/A';
-
-                usernameSpan.textContent = user.username || 'N/A';
-
-
-
-                // Prepare data to send to your Flask backend
-
-                // This payload is what your Flask's get_user_info expects in request.json
-
-                const payload = {
-
-                    user: user // Sending the user object directly
-
-                };
-
-
-
-                // Send data to your Flask backend
-
-                fetch('/get_user_info', {
-
-                    method: 'POST',
-
-                    headers: {
-
-                        'Content-Type': 'application/json',
-
-                        // THIS IS THE CRITICAL HEADER!
-
-                        'X-Telegram-Init-Data': initData // Send the raw initData from Telegram
-
-                    },
-
-                    body: JSON.stringify(payload)
-
-                })
-
-                .then(response => {
-
-                    if (!response.ok) {
-
-                        // If the response is not OK (e.g., 401, 500), read error details
-
-                        return response.json().then(errorData => {
-
-                            throw new Error(errorData.error || `HTTP error! Status: ${response.status}`);
-
-                        }).catch(() => {
-
-                            // If response is not JSON, try to read as text (e.g., HTML error page)
-
-                            return response.text().then(text => {
-
-                                throw new Error(`HTTP error! Status: ${response.status}. Raw response: ${text.substring(0, 200)}...`);
-
-                            });
-
-                        });
-
-                    }
-
-                    return response.json();
-
-                })
-
-                .then(data => {
-
-                    if (data.status === 'success') {
-
-                        statusMessage.textContent = 'User data sent and processed successfully!';
-
-                        statusMessage.className = 'success';
-
-                        console.log('Backend response:', data);
-
-                        // You can update UI further or navigate
-
-                    } else {
-
-                        statusMessage.textContent = `Error: ${data.error || 'Unknown error from backend'}`;
-
-                        statusMessage.className = 'error';
-
-                        console.error('Backend reported error:', data);
-
-                    }
-
-                })
-
-                .catch(error => {
-
-                    statusMessage.textContent = `Client-side error: ${error.message}`;
-
-                    statusMessage.className = 'error';
-
-                    console.error('Fetch error:', error);
-
-                });
-
-
-
-            } else {
-
-                statusMessage.textContent = 'Error: Telegram user data or initData not available.';
-
-                statusMessage.className = 'error';
-
-                console.error('Telegram.WebApp.initDataUnsafe.user or initData is missing.');
-
-            }
-
-
-
-        } else {
-
-            statusMessage.textContent = 'Telegram Web App environment not detected. Please open this page within Telegram.';
-
-            statusMessage.className = 'error';
-
-            console.error('Telegram.WebApp object not found. This page is not running in a Telegram Mini App context.');
-
-        }
-
-    </script>
-
+    <div class="container">
+        <h1>Welcome to Your Mini App!</h1>
+        <p>Connecting to backend...</p>
+        <div id="user-info">
+            <p><strong>Telegram User ID:</strong> <span id="userId">Loading...</span></p>
+            <p><strong>First Name:</strong> <span id="firstName">Loading...</span></p>
+            <p><strong>Username:</strong> <span id="username">Loading...</span></p>
+        </div>
+        <p id="statusMessage" class="loading">Sending user data...</p>
+    </div>
+
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script>
+        const userIdSpan = document.getElementById('userId');
+        const firstNameSpan = document.getElementById('firstName');
+        const usernameSpan = document.getElementById('username');
+        const statusMessage = document.getElementById('statusMessage');
+
+        // Check if Telegram Web App is ready and available
+        if (Telegram && Telegram.WebApp) {
+            Telegram.WebApp.ready();
+            Telegram.WebApp.expand(); // Optional: expand the mini app to full screen
+
+            const initData = Telegram.WebApp.initData;
+            const user = Telegram.WebApp.initDataUnsafe.user; // Parsed user object
+
+            if (user && initData) { // Ensure both user and initData are present
+                // Display user info immediately from initDataUnsafe
+                userIdSpan.textContent = user.id || 'N/A';
+                firstNameSpan.textContent = user.first_name || 'N/A';
+                usernameSpan.textContent = user.username || 'N/A';
+
+                // Prepare data to send to your Flask backend
+                const payload = {
+                    user: user // Sending the user object directly
+                };
+
+                // Send data to your Flask backend
+                fetch('/get_user_info', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Telegram-Init-Data': initData // Send the raw initData from Telegram
+                    },
+                    body: JSON.stringify(payload)
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        return response.json().then(errorData => {
+                            throw new Error(errorData.error || `HTTP error! Status: ${response.status}`);
+                        }).catch(() => {
+                            return response.text().then(text => {
+                                throw new Error(`HTTP error! Status: ${response.status}. Raw response: ${text.substring(0, 200)}...`);
+                            });
+                        });
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.status === 'success') {
+                        statusMessage.textContent = 'User data sent and processed successfully!';
+                        statusMessage.className = 'success';
+                        console.log('Backend response:', data);
+                    } else {
+                        statusMessage.textContent = `Error: ${data.error || 'Unknown error from backend'}`;
+                        statusMessage.className = 'error';
+                        console.error('Backend reported error:', data);
+                    }
+                })
+                .catch(error => {
+                    statusMessage.textContent = `Client-side error: ${error.message}`;
+                    statusMessage.className = 'error';
+                    console.error('Fetch error:', error);
+                });
+
+            } else {
+                statusMessage.textContent = 'Error: Telegram user data or initData not available.';
+                statusMessage.className = 'error';
+                console.error('Telegram.WebApp.initDataUnsafe.user or initData is missing.');
+            }
+
+        } else {
+            statusMessage.textContent = 'Telegram Web App environment not detected. Please open this page within Telegram.';
+            statusMessage.className = 'error';
+            console.error('Telegram.WebApp object not found. This page is not running in a Telegram Mini App context.');
+        }
+    </script>
 </body>
-
 </html>
-
