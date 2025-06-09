@@ -166,49 +166,39 @@
 
         // Function to fetch and display overview data
         async function fetchOverviewData() {
+            // Set initial loading states
+            document.getElementById('totalUsers').textContent = 'Loading...';
+            document.getElementById('activeToday').textContent = 'Loading...';
+            document.getElementById('topEventType').textContent = 'Loading...';
+
             try {
                 // Fetch user count and active users
                 const userCountRes = await fetch('/analytics/users/count');
-                let userCountData = {total_users: 'N/A', active_today: 'N/A'}; // Default values
                 if (userCountRes.ok) {
-                    userCountData = await userCountRes.json();
+                    const userCountData = await userCountRes.json();
+                    document.getElementById('totalUsers').textContent = userCountData.total_users || 0;
+                    document.getElementById('activeToday').textContent = userCountData.active_today || 0;
                 } else {
-                    console.error(`Error fetching user count: ${userCountRes.status} ${userCountRes.statusText}`);
-                    // Attempt to read error message from response if available
-                    try {
-                        const errorBody = await userCountRes.json();
-                        console.error('User count error details:', errorBody);
-                        userCountData.total_users = 'Error (' + (errorBody.error || userCountRes.status) + ')';
-                        userCountData.active_today = 'Error (' + (errorBody.error || userCountRes.status) + ')';
-                    } catch (e) {
-                        console.error('Failed to parse user count error response:', e);
-                    }
+                    const errorDetails = await userCountRes.text(); // Read as text to avoid JSON parsing errors
+                    console.error(`Error fetching user count: ${userCountRes.status} ${userCountRes.statusText}. Details: ${errorDetails}`);
+                    document.getElementById('totalUsers').textContent = `Error (${userCountRes.status})`;
+                    document.getElementById('activeToday').textContent = `Error (${userCountRes.status})`;
                 }
-                document.getElementById('totalUsers').textContent = userCountData.total_users;
-                document.getElementById('activeToday').textContent = userCountData.active_today;
-
 
                 // Fetch top events
                 const topEventsRes = await fetch('/analytics/events/top');
-                let topEventsData = []; // Default empty array
                 if (topEventsRes.ok) {
-                    topEventsData = await topEventsRes.json();
+                    const topEventsData = await topEventsRes.json();
+                    document.getElementById('topEventType').textContent = topEventsData.length > 0 ? topEventsData[0].event_type : 'N/A';
                 } else {
-                    console.error(`Error fetching top events: ${topEventsRes.status} ${topEventsRes.statusText}`);
-                     // Attempt to read error message from response if available
-                    try {
-                        const errorBody = await topEventsRes.json();
-                        console.error('Top events error details:', errorBody);
-                        document.getElementById('topEventType').textContent = 'Error (' + (errorBody.error || topEventsRes.status) + ')';
-                    } catch (e) {
-                        console.error('Failed to parse top events error response:', e);
-                        document.getElementById('topEventType').textContent = 'Error';
-                    }
+                    const errorDetails = await topEventsRes.text(); // Read as text
+                    console.error(`Error fetching top events: ${topEventsRes.status} ${topEventsRes.statusText}. Details: ${errorDetails}`);
+                    document.getElementById('topEventType').textContent = `Error (${topEventsRes.status})`;
                 }
-                document.getElementById('topEventType').textContent = topEventsData.length > 0 ? topEventsData[0].event_type : 'N/A';
 
             } catch (error) {
-                console.error('Error fetching overview data:', error);
+                // This catch block handles network errors or errors that occur before a valid HTTP response is even received
+                console.error('Network or unhandled error fetching overview data:', error);
                 document.getElementById('totalUsers').textContent = 'Error (Client)';
                 document.getElementById('activeToday').textContent = 'Error (Client)';
                 document.getElementById('topEventType').textContent = 'Error (Client)';
@@ -222,7 +212,8 @@
             try {
                 const response = await fetch(`/admin/users?query=${encodeURIComponent(query)}&sort=${sort}`);
                 if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    const errorText = await response.text(); // Read error response as text
+                    throw new Error(`HTTP error! Status: ${response.status}. Details: ${errorText}`);
                 }
                 const users = await response.json();
                 currentUsers = users; // Store fetched users
@@ -278,17 +269,26 @@
             try {
                 // Fetch user profile
                 const userRes = await fetch(`/admin/user/${userId}`);
-                if (!userRes.ok) throw new Error('User not found');
+                if (!userRes.ok) {
+                    const errorText = await userRes.text();
+                    throw new Error(`User not found or API error: ${userRes.status}. Details: ${errorText}`);
+                }
                 const userData = await userRes.json();
 
                 // Fetch user sessions
                 const sessionsRes = await fetch(`/admin/user/${userId}/sessions`);
-                if (!sessionsRes.ok) throw new Error('Sessions not found');
+                if (!sessionsRes.ok) {
+                    const errorText = await sessionsRes.text();
+                    throw new Error(`Sessions API error: ${sessionsRes.status}. Details: ${errorText}`);
+                }
                 const sessionsData = await sessionsRes.json();
 
                 // Fetch user events
                 const eventsRes = await fetch(`/admin/user/${userId}/events`);
-                if (!eventsRes.ok) throw new Error('Events not found');
+                if (!eventsRes.ok) {
+                    const errorText = await eventsRes.text();
+                    throw new Error(`Events API error: ${eventsRes.status}. Details: ${errorText}`);
+                }
                 const eventsData = await eventsRes.json();
 
                 // Populate modal
@@ -392,7 +392,8 @@
                         method: 'DELETE'
                     });
                     if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
+                        const errorText = await response.text();
+                        throw new Error(`HTTP error! status: ${response.status}. Details: ${errorText}`);
                     }
                     alert('User data deleted successfully.');
                     userDetailModal.hide();
