@@ -1,48 +1,199 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Telegram Mini App</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
+        :root {
+            --primary-color: #0088cc;
+            --primary-hover: #006699;
+            --text-color: #333;
+            --bg-color: #fff;
+            --card-bg: #f9f9f9;
+            --border-radius: 12px;
+            --box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            --transition: all 0.3s ease;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
         body {
-            font-family: Arial, sans-serif;
+            font-family: 'Segoe UI', Roboto, -apple-system, sans-serif;
+            line-height: 1.6;
+            color: var(--text-color);
+            background-color: var(--bg-color);
+            padding: 1rem;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .container {
+            width: 100%;
             max-width: 600px;
-            margin: 0 auto;
-            padding: 20px;
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        header {
             text-align: center;
+            margin-bottom: 1rem;
         }
-        .user-info {
-            margin-top: 20px;
-            padding: 15px;
-            border: 1px solid #ddd;
-            border-radius: 8px;
-            background-color: #f9f9f9;
+
+        h1 {
+            font-size: clamp(1.5rem, 4vw, 2rem);
+            margin-bottom: 0.5rem;
+            color: var(--primary-color);
         }
+
+        p {
+            font-size: 1rem;
+            color: #666;
+        }
+
         button {
-            background-color: #0088cc;
+            background-color: var(--primary-color);
             color: white;
             border: none;
-            padding: 10px 20px;
-            border-radius: 5px;
+            padding: 0.75rem 1.5rem;
+            border-radius: var(--border-radius);
             cursor: pointer;
-            font-size: 16px;
+            font-size: 1rem;
+            font-weight: 500;
+            transition: var(--transition);
+            width: 100%;
+            max-width: 300px;
+            margin: 0 auto;
+            box-shadow: var(--box-shadow);
         }
+
         button:hover {
-            background-color: #006699;
+            background-color: var(--primary-hover);
+            transform: translateY(-2px);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        .user-info {
+            width: 100%;
+            padding: 1.5rem;
+            border-radius: var(--border-radius);
+            background-color: var(--card-bg);
+            box-shadow: var(--box-shadow);
+            display: none;
+            flex-direction: column;
+            gap: 1rem;
+            animation: fadeIn 0.5s ease;
+        }
+
+        .user-info h2 {
+            font-size: 1.25rem;
+            color: var(--primary-color);
+            text-align: center;
+            margin-bottom: 0.5rem;
+        }
+
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.5rem 0;
+            border-bottom: 1px solid #eee;
+        }
+
+        .info-row:last-child {
+            border-bottom: none;
+        }
+
+        .info-label {
+            font-weight: 600;
+            color: #555;
+        }
+
+        .info-value {
+            color: #222;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Responsive adjustments */
+        @media (max-width: 480px) {
+            .container {
+                padding: 1rem;
+            }
+            
+            h1 {
+                font-size: 1.75rem;
+            }
+            
+            .user-info {
+                padding: 1rem;
+            }
+            
+            button {
+                padding: 0.75rem;
+            }
+        }
+
+        /* Dark mode support for Telegram */
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --text-color: #e1e1e1;
+                --bg-color: #1a1a1a;
+                --card-bg: #2d2d2d;
+            }
+            
+            p {
+                color: #aaa;
+            }
+            
+            .info-label {
+                color: #bbb;
+            }
+            
+            .info-value {
+                color: #f1f1f1;
+            }
         }
     </style>
 </head>
 <body>
-    <h1>Welcome to My Telegram Mini App</h1>
-    <p>Click the button below to share your Telegram user information.</p>
-    
-    <button id="share-btn">Share My Info</button>
-    
-    <div id="user-info" class="user-info" style="display: none;">
-        <h2>Your Information</h2>
-        <p><strong>User ID:</strong> <span id="user-id"></span></p>
-        <p><strong>Name:</strong> <span id="user-name"></span></p>
-        <p><strong>Username:</strong> @<span id="username"></span></p>
+    <div class="container">
+        <header>
+            <h1>Welcome to My Telegram Mini App</h1>
+            <p>Click the button below to share your Telegram user information.</p>
+        </header>
+        
+        <button id="share-btn">Share My Info</button>
+        
+        <div id="user-info" class="user-info">
+            <h2>Your Information</h2>
+            <div class="info-row">
+                <span class="info-label">User ID:</span>
+                <span id="user-id" class="info-value"></span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Name:</span>
+                <span id="user-name" class="info-value"></span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Username:</span>
+                <span id="username" class="info-value"></span>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -51,11 +202,29 @@
         // Expand the Mini App to full view
         tg.expand();
         
+        // Set theme params if needed
+        const setTheme = () => {
+            document.documentElement.style.setProperty('--primary-color', tg.themeParams.button_color || '#0088cc');
+            document.documentElement.style.setProperty('--bg-color', tg.themeParams.bg_color || '#ffffff');
+            document.documentElement.style.setProperty('--text-color', tg.themeParams.text_color || '#333333');
+        };
+        
+        // Set initial theme
+        setTheme();
+        
+        // Listen for theme changes
+        tg.onEvent('themeChanged', setTheme);
+        
         document.getElementById('share-btn').addEventListener('click', () => {
             // Get the user data from Telegram WebApp
             const user = tg.initDataUnsafe.user;
             
             if (user) {
+                // Add loading state
+                const btn = document.getElementById('share-btn');
+                btn.disabled = true;
+                btn.textContent = 'Loading...';
+                
                 // Send the user data to our backend
                 fetch('/get_user_info', {
                     method: 'POST',
@@ -72,7 +241,7 @@
                         document.getElementById('user-name').textContent = 
                             `${data.first_name} ${data.last_name}`.trim();
                         document.getElementById('username').textContent = data.username;
-                        document.getElementById('user-info').style.display = 'block';
+                        document.getElementById('user-info').style.display = 'flex';
                         
                         // You can also send data back to the bot if needed
                         tg.sendData(JSON.stringify({
@@ -83,6 +252,11 @@
                 })
                 .catch(error => {
                     console.error('Error:', error);
+                    alert('An error occurred. Please try again.');
+                })
+                .finally(() => {
+                    btn.disabled = false;
+                    btn.textContent = 'Share My Info';
                 });
             } else {
                 alert('User data not available. Please open this app through Telegram.');
