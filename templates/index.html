@@ -3,323 +3,141 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Telegram Mini App</title>
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <title>My Telegram Mini App</title>
     <style>
-        :root {
-            --primary-color: #0088cc;
-            --primary-hover: #006699;
-            --text-color: #333;
-            --bg-color: #fff;
-            --card-bg: #f9f9f9;
-            --border-radius: 12px;
-            --box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-            --transition: all 0.3s ease;
-        }
-
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
         body {
-            font-family: 'Segoe UI', Roboto, -apple-system, sans-serif;
-            line-height: 1.6;
-            color: var(--text-color);
-            background-color: var(--bg-color);
-            padding: 1rem;
-            min-height: 100vh;
+            font-family: sans-serif;
             display: flex;
             flex-direction: column;
+            justify-content: center;
             align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+            color: #333;
+            text-align: center;
         }
-
         .container {
-            width: 100%;
-            max-width: 600px;
-            padding: 1.5rem;
-            display: flex;
-            flex-direction: column;
-            gap: 1.5rem;
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            max-width: 400px;
+            width: 90%;
         }
-
-        header {
-            text-align: center;
-            margin-bottom: 1rem;
-        }
-
         h1 {
-            font-size: clamp(1.5rem, 4vw, 2rem);
-            margin-bottom: 0.5rem;
-            color: var(--primary-color);
+            color: #007bff;
+            margin-bottom: 20px;
         }
-
         p {
-            font-size: 1rem;
-            color: #666;
+            margin-bottom: 10px;
         }
-
-        .user-info {
-            width: 100%;
-            padding: 1.5rem;
-            border-radius: var(--border-radius);
-            background-color: var(--card-bg);
-            box-shadow: var(--box-shadow);
-            display: flex;
-            flex-direction: column;
-            gap: 1rem;
-            animation: fadeIn 0.5s ease;
+        #statusMessage {
+            margin-top: 20px;
+            font-weight: bold;
         }
-
-        .user-info h2 {
-            font-size: 1.25rem;
-            color: var(--primary-color);
-            text-align: center;
-            margin-bottom: 0.5rem;
+        .loading {
+            color: #6c757d;
         }
-
-        .info-row {
-            display: flex;
-            justify-content: space-between;
-            padding: 0.5rem 0;
-            border-bottom: 1px solid #eee;
+        .success {
+            color: #28a745;
         }
-
-        .info-row:last-child {
-            border-bottom: none;
-        }
-
-        .info-label {
-            font-weight: 600;
-            color: #555;
-        }
-
-        .info-value {
-            color: #222;
-            text-align: right;
-            max-width: 60%;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        .button-group {
-            display: flex;
-            flex-direction: column;
-            gap: 1rem;
-            width: 100%;
-            max-width: 300px;
-            margin: 0 auto;
-        }
-
-        button {
-            background-color: var(--primary-color);
-            color: white;
-            border: none;
-            padding: 0.75rem 1.5rem;
-            border-radius: var(--border-radius);
-            cursor: pointer;
-            font-size: 1rem;
-            font-weight: 500;
-            transition: var(--transition);
-            width: 100%;
-            box-shadow: var(--box-shadow);
-        }
-
-        button.secondary {
-            background-color: transparent;
-            color: var(--primary-color);
-            border: 1px solid var(--primary-color);
-        }
-
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        /* Loading spinner */
-        .spinner {
-            display: inline-block;
-            width: 20px;
-            height: 20px;
-            border: 3px solid rgba(255,255,255,.3);
-            border-radius: 50%;
-            border-top-color: #fff;
-            animation: spin 1s ease-in-out infinite;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
-        /* Responsive adjustments */
-        @media (max-width: 480px) {
-            .container {
-                padding: 1rem;
-            }
-            
-            h1 {
-                font-size: 1.75rem;
-            }
-            
-            .user-info {
-                padding: 1rem;
-            }
-        }
-
-        /* Dark mode support */
-        @media (prefers-color-scheme: dark) {
-            :root {
-                --text-color: #e1e1e1;
-                --bg-color: #1a1a1a;
-                --card-bg: #2d2d2d;
-            }
-            
-            p {
-                color: #aaa;
-            }
-            
-            .info-label {
-                color: #bbb;
-            }
-            
-            .info-value {
-                color: #f1f1f1;
-            }
-            
-            button.secondary {
-                color: #e1e1e1;
-                border-color: #e1e1e1;
-            }
+        .error {
+            color: #dc3545;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <header>
-            <h1>Welcome to My Telegram Mini App</h1>
-            <p>Your Telegram information is displayed below:</p>
-        </header>
-        
-        <div id="user-info" class="user-info">
-            <h2>Your Telegram Information</h2>
-            <div class="info-row">
-                <span class="info-label">User ID:</span>
-                <span id="user-id" class="info-value">Loading...</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">Name:</span>
-                <span id="user-name" class="info-value">Loading...</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">Username:</span>
-                <span id="username" class="info-value">Loading...</span>
-            </div>
+        <h1>Welcome to Your Mini App!</h1>
+        <p>Connecting to backend...</p>
+        <div id="user-info">
+            <p><strong>Telegram User ID:</strong> <span id="userId">Loading...</span></p>
+            <p><strong>First Name:</strong> <span id="firstName">Loading...</span></p>
+            <p><strong>Username:</strong> <span id="username">Loading...</span></p>
         </div>
-
-        <div class="button-group">
-            <button id="close-btn" class="secondary">Close App</button>
-        </div>
+        <p id="statusMessage" class="loading">Sending user data...</p>
     </div>
 
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script>
-        // Initialize Telegram WebApp
-        const tg = window.Telegram.WebApp;
-        
-        // Expand the Mini App to full view
-        tg.expand();
-        
-        // Set theme colors based on Telegram's theme
-        const setTheme = () => {
-            document.documentElement.style.setProperty(
-                '--primary-color', 
-                tg.themeParams.button_color || '#0088cc'
-            );
-            document.documentElement.style.setProperty(
-                '--bg-color', 
-                tg.themeParams.bg_color || '#ffffff'
-            );
-            document.documentElement.style.setProperty(
-                '--text-color', 
-                tg.themeParams.text_color || '#333333'
-            );
-        };
-        
-        // Set initial theme
-        setTheme();
-        
-        // Listen for theme changes
-        tg.onEvent('themeChanged', setTheme);
-        
-        // Notify Telegram that WebApp is ready
-        tg.ready();
+        const userIdSpan = document.getElementById('userId');
+        const firstNameSpan = document.getElementById('firstName');
+        const usernameSpan = document.getElementById('username');
+        const statusMessage = document.getElementById('statusMessage');
 
-        // Function to display user info
-        function displayUserInfo() {
-            const user = tg.initDataUnsafe.user;
-            
+        // Check if Telegram Web App is ready and available
+        if (Telegram && Telegram.WebApp) {
+            Telegram.WebApp.ready();
+            Telegram.WebApp.expand(); // Optional: expand the mini app to full screen
+
+            const initData = Telegram.WebApp.initData;
+            const user = Telegram.WebApp.initDataUnsafe.user; // Parsed user object
+
             if (user) {
-                // Display user info immediately
-                document.getElementById('user-id').textContent = user.id || 'Not available';
-                document.getElementById('user-name').textContent = 
-                    `${user.first_name || ''} ${user.last_name || ''}`.trim() || 'Not available';
-                document.getElementById('username').textContent = user.username ? `@${user.username}` : 'Not set';
-                
-                // Send data to backend with Telegram initData
-                sendToBackend(user, tg.initData);
-            } else {
-                document.getElementById('user-id').textContent = 'Not available';
-                document.getElementById('user-name').textContent = 'Please open in Telegram';
-                document.getElementById('username').textContent = 'Not available';
-            }
-        }
+                // Display user info immediately from initDataUnsafe
+                userIdSpan.textContent = user.id || 'N/A';
+                firstNameSpan.textContent = user.first_name || 'N/A';
+                usernameSpan.textContent = user.username || 'N/A';
 
-        // Function to send data to backend
-        function sendToBackend(user, initData) {
-            fetch('/get_user_info', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Telegram-Init-Data': initData, // Crucial: Send the initData
-                    // The X-Telegram-Hash header is no longer needed separately
-                    // as the hash is part of initData itself for server-side validation.
-                },
-                body: JSON.stringify({ user })
-            })
-            .then(response => {
-                if (!response.ok) {
-                    // Check for specific error status if needed
-                    if (response.status === 401) {
-                        console.error('Authentication Error: Unauthorized access to backend.');
+                // Prepare data to send to your Flask backend
+                // This payload is what your Flask's get_user_info expects in request.json
+                const payload = {
+                    user: user // Sending the user object directly
+                };
+
+                // Send data to your Flask backend
+                fetch('/get_user_info', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        // THIS IS THE CRITICAL HEADER!
+                        'X-Telegram-Init-Data': initData // Send the raw initData from Telegram
+                    },
+                    body: JSON.stringify(payload)
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        // If the response is not OK (e.g., 401, 500), read error details
+                        return response.json().then(errorData => {
+                            throw new Error(errorData.error || `HTTP error! Status: ${response.status}`);
+                        }).catch(() => {
+                            // If response is not JSON, try to read as text (e.g., HTML error page)
+                            return response.text().then(text => {
+                                throw new Error(`HTTP error! Status: ${response.status}. Raw response: ${text.substring(0, 200)}...`);
+                            });
+                        });
                     }
-                    throw new Error(`Network response was not ok: ${response.statusText}`);
-                }
-                return response.json();
-            })
-            .then(data => {
-                console.log('Data saved to backend:', data);
-            })
-            .catch(error => {
-                console.error('Error saving to backend:', error);
-            });
-        }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.status === 'success') {
+                        statusMessage.textContent = 'User data sent and processed successfully!';
+                        statusMessage.className = 'success';
+                        console.log('Backend response:', data);
+                        // You can update UI further or navigate
+                    } else {
+                        statusMessage.textContent = `Error: ${data.error || 'Unknown error from backend'}`;
+                        statusMessage.className = 'error';
+                        console.error('Backend reported error:', data);
+                    }
+                })
+                .catch(error => {
+                    statusMessage.textContent = `Client-side error: ${error.message}`;
+                    statusMessage.className = 'error';
+                    console.error('Fetch error:', error);
+                });
 
-        // Close button handler
-        document.getElementById('close-btn').addEventListener('click', () => {
-            tg.close();
-        });
+            } else {
+                statusMessage.textContent = 'Error: Telegram user data not available.';
+                statusMessage.className = 'error';
+                console.error('Telegram.WebApp.initDataUnsafe.user is missing.');
+            }
 
-        // Fallback for non-Telegram browsers
-        if (!window.Telegram || !window.Telegram.WebApp) {
-            document.body.innerHTML = `
-                <div class="container">
-                    <h1>This app only works within Telegram</h1>
-                    <p>Please open this link from a Telegram chat to use the mini app.</p>
-                </div>
-            `;
         } else {
-            // Display user info when page loads
-            displayUserInfo();
+            statusMessage.textContent = 'Telegram Web App environment not detected. Please open this page within Telegram.';
+            statusMessage.className = 'error';
+            console.error('Telegram.WebApp object not found. This page is not running in a Telegram Mini App context.');
         }
     </script>
 </body>
