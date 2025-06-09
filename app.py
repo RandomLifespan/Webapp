@@ -164,6 +164,7 @@ def check_telegram_authentication():
     # Admin routes will use their own Basic Auth.
     exempt_endpoints = [
         'index', 'static', 'admin_users', 'user_count', 
+        'admin_panel',
         'user_growth', 'top_events', 'get_user_profile', 
         'get_user_sessions', 'get_user_events', 'delete_user_data'
     ]
