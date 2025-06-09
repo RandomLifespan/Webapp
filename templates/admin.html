@@ -167,25 +167,54 @@
         // Function to fetch and display overview data
         async function fetchOverviewData() {
             try {
-                const [userCountRes, topEventsRes] = await Promise.all([
-                    fetch('/analytics/users/count'),
-                    fetch('/analytics/events/top')
-                ]);
+                // Fetch user count and active users
+                const userCountRes = await fetch('/analytics/users/count');
+                let userCountData = {total_users: 'N/A', active_today: 'N/A'}; // Default values
+                if (userCountRes.ok) {
+                    userCountData = await userCountRes.json();
+                } else {
+                    console.error(`Error fetching user count: ${userCountRes.status} ${userCountRes.statusText}`);
+                    // Attempt to read error message from response if available
+                    try {
+                        const errorBody = await userCountRes.json();
+                        console.error('User count error details:', errorBody);
+                        userCountData.total_users = 'Error (' + (errorBody.error || userCountRes.status) + ')';
+                        userCountData.active_today = 'Error (' + (errorBody.error || userCountRes.status) + ')';
+                    } catch (e) {
+                        console.error('Failed to parse user count error response:', e);
+                    }
+                }
+                document.getElementById('totalUsers').textContent = userCountData.total_users;
+                document.getElementById('activeToday').textContent = userCountData.active_today;
 
-                const userCountData = await userCountRes.json();
-                const topEventsData = await topEventsRes.json();
 
-                document.getElementById('totalUsers').textContent = userCountData.total_users || 0;
-                document.getElementById('activeToday').textContent = userCountData.active_today || 0;
+                // Fetch top events
+                const topEventsRes = await fetch('/analytics/events/top');
+                let topEventsData = []; // Default empty array
+                if (topEventsRes.ok) {
+                    topEventsData = await topEventsRes.json();
+                } else {
+                    console.error(`Error fetching top events: ${topEventsRes.status} ${topEventsRes.statusText}`);
+                     // Attempt to read error message from response if available
+                    try {
+                        const errorBody = await topEventsRes.json();
+                        console.error('Top events error details:', errorBody);
+                        document.getElementById('topEventType').textContent = 'Error (' + (errorBody.error || topEventsRes.status) + ')';
+                    } catch (e) {
+                        console.error('Failed to parse top events error response:', e);
+                        document.getElementById('topEventType').textContent = 'Error';
+                    }
+                }
                 document.getElementById('topEventType').textContent = topEventsData.length > 0 ? topEventsData[0].event_type : 'N/A';
 
             } catch (error) {
                 console.error('Error fetching overview data:', error);
-                document.getElementById('totalUsers').textContent = 'Error';
-                document.getElementById('activeToday').textContent = 'Error';
-                document.getElementById('topEventType').textContent = 'Error';
+                document.getElementById('totalUsers').textContent = 'Error (Client)';
+                document.getElementById('activeToday').textContent = 'Error (Client)';
+                document.getElementById('topEventType').textContent = 'Error (Client)';
             }
         }
+
 
         // Function to fetch and display users based on search/filter
         async function fetchAndDisplayUsers(query = '', sort = 'recent') {
