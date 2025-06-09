@@ -230,13 +230,15 @@ def top_events():
 
 # Admin protection middleware
 def require_admin_auth(f):
-    @wraps(f)
+    @wraps(f) # Add this line
     def decorated(*args, **kwargs):
         auth = request.authorization
         if not auth or not check_admin_credentials(auth.username, auth.password):
-            return jsonify({'error': 'Admin authentication required'}), 401
+            return 'Could not verify your access level for that URL.\n' \
+                   'You have to login with proper credentials', 401, \
+                   {'WWW-Authenticate': 'Basic realm="Login Required"'}
         return f(*args, **kwargs)
-    return decorated
+    return decorated    
 
 def check_admin_credentials(username, password):
     # In production, use proper password hashing and environment variables
@@ -249,10 +251,15 @@ def check_admin_credentials(username, password):
 def admin_users():
     try:
         conn = get_db_connection()
-        users = conn.execute('SELECT * FROM users ORDER BY last_seen DESC LIMIT 100').fetchall()
+        # The database query remains the same
+        users_raw = conn.execute('SELECT * FROM users ORDER BY last_seen DESC LIMIT 100').fetchall()
         conn.close()
-        return jsonify([dict(user) for user in users])
+        # Convert list of Row objects to list of dictionaries
+        users = [dict(user) for user in users_raw]
+        # Instead of jsonify, render the HTML template
+        return render_template('admin.html', users=users)
     except Exception as e:
+        # You could even render an error template here
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
