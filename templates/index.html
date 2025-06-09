@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Telegram Mini App</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            text-align: center;
+        }
+        .user-info {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background-color: #f9f9f9;
+        }
+        button {
+            background-color: #0088cc;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #006699;
+        }
+    </style>
+</head>
+<body>
+    <h1>Welcome to My Telegram Mini App</h1>
+    <p>Click the button below to share your Telegram user information.</p>
+    
+    <button id="share-btn">Share My Info</button>
+    
+    <div id="user-info" class="user-info" style="display: none;">
+        <h2>Your Information</h2>
+        <p><strong>User ID:</strong> <span id="user-id"></span></p>
+        <p><strong>Name:</strong> <span id="user-name"></span></p>
+        <p><strong>Username:</strong> @<span id="username"></span></p>
+    </div>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        
+        // Expand the Mini App to full view
+        tg.expand();
+        
+        document.getElementById('share-btn').addEventListener('click', () => {
+            // Get the user data from Telegram WebApp
+            const user = tg.initDataUnsafe.user;
+            
+            if (user) {
+                // Send the user data to our backend
+                fetch('/get_user_info', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ user })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        // Display the user info
+                        document.getElementById('user-id').textContent = data.user_id;
+                        document.getElementById('user-name').textContent = 
+                            `${data.first_name} ${data.last_name}`.trim();
+                        document.getElementById('username').textContent = data.username;
+                        document.getElementById('user-info').style.display = 'block';
+                        
+                        // You can also send data back to the bot if needed
+                        tg.sendData(JSON.stringify({
+                            action: 'user_shared',
+                            user_id: data.user_id
+                        }));
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                });
+            } else {
+                alert('User data not available. Please open this app through Telegram.');
+            }
+        });
+    </script>
+</body>
+</html>
