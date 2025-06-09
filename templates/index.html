@@ -218,7 +218,6 @@
         </div>
 
         <div class="button-group">
-            <button id="send-data-btn">Send Data to Bot</button>
             <button id="close-btn" class="secondary">Close App</button>
         </div>
     </div>
@@ -296,29 +295,7 @@
             });
         }
 
-        // Manual send data button handler
-        document.getElementById('send-data-btn').addEventListener('click', () => {
-            const user = tg.initDataUnsafe.user;
-            if (user) {
-                const btn = document.getElementById('send-data-btn');
-                btn.innerHTML = '<span class="spinner"></span> Sending...';
-                btn.disabled = true;
-                
-                tg.sendData(JSON.stringify({
-                    action: 'user_data',
-                    user_id: user.id,
-                    username: user.username
-                }));
-                
-                setTimeout(() => {
-                    btn.textContent = 'Data Sent!';
-                    setTimeout(() => {
-                        btn.textContent = 'Send Data to Bot';
-                        btn.disabled = false;
-                    }, 1000);
-                }, 500);
-            }
-        });
+       
 
         // Close button handler
         document.getElementById('close-btn').addEventListener('click', () => {
