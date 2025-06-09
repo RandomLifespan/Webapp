@@ -183,9 +183,13 @@ def check_telegram_authentication():
 
 # --- Routes ---
 
+
+
 @app.route('/')
 def index():
     return render_template('index.html')
+
+
 
 @app.route('/get_user_info', methods=['POST'])
 def get_user_info():
@@ -283,6 +287,13 @@ def get_user_info():
             conn.close()
 
 # --- Analytics Endpoints ---
+
+@app.route('/admin') # <--- This is the URL that will display admin.html
+@require_admin_auth
+def admin_panel():
+    return render_template('admin.html')
+
+
 @app.route('/analytics/users/count')
 @require_admin_auth
 def user_count():
