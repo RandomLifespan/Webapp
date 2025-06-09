@@ -1,11 +1,13 @@
-from functools import wraps
-from flask import Flask, request, jsonify, render_template
 import os
 import sqlite3
 from datetime import datetime
 import hashlib
 import hmac
 import secrets
+import json # Import json for json.dumps
+
+from functools import wraps
+from flask import Flask, request, jsonify, render_template
 
 
 app = Flask(__name__)
@@ -70,23 +72,55 @@ init_db()
 # Security helper functions
 def validate_telegram_data(init_data):
     try:
-        data_pairs = sorted([x.split('=') for x in init_data.split('&') if x.startswith('user=') == False])
-        data_check_string = '\n'.join([f"{k}={v}" for k, v in data_pairs])
+        # Parse the init_data string
+        query_params = dict(qp.split('=', 1) for qp in init_data.split('&'))
+        received_hash = query_params.pop('hash', None) # Extract and remove 'hash'
+
+        if not received_hash:
+            return False
+
+        # Sort remaining parameters alphabetically and concatenate them
+        # (excluding the 'user' parameter, as per your original logic)
+        data_check_list = []
+        for key, value in sorted(query_params.items()):
+            if key != 'user': # Keep this line if you want to exclude 'user' from the hash check
+                data_check_list.append(f"{key}={value}")
+        data_check_string = '\n'.join(data_check_list)
         
+        # The secret key for HMAC-SHA256 is the SHA256 hash of your bot token
         secret_key = hashlib.sha256(TELEGRAM_BOT_TOKEN.encode()).digest()
+        
+        # Calculate the hash
         computed_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
         
-        return hmac.compare_digest(computed_hash, request.headers.get('X-Telegram-Hash', ''))
-    except:
+        # Compare the computed hash with the received hash
+        return hmac.compare_digest(computed_hash, received_hash)
+    except Exception as e:
+        print(f"Telegram Data Validation Error: {e}") # Log the error for debugging
         return False
 
 # Middleware to check Telegram authentication
-# @app.before_request
+@app.before_request
 def check_telegram_authentication():
+    # Allow 'index' and 'static' endpoints without Telegram authentication
     if request.endpoint in ['index', 'static']:
         return
-    if not validate_telegram_data(request.headers.get('X-Telegram-Init-Data', '')):
-        return jsonify({'error': 'Unauthorized'}), 401
+
+    # For analytics and admin endpoints, if you want them accessible from a browser
+    # without full Telegram auth, you'd need to add their endpoint names here,
+    # or implement a different authentication mechanism for them (like the admin basic auth)
+    # For now, let's assume all endpoints except index/static need Telegram auth.
+    
+    telegram_init_data = request.headers.get('X-Telegram-Init-Data')
+    
+    if not telegram_init_data:
+        return jsonify({'error': 'Unauthorized: Missing X-Telegram-Init-Data header'}), 401
+
+    if not validate_telegram_data(telegram_init_data):
+        return jsonify({'error': 'Unauthorized: Invalid Telegram data'}), 401
+    
+    # If validation passes, continue with the request
+    return
 
 @app.route('/')
 def index():
@@ -98,7 +132,7 @@ def get_user_info():
     now = datetime.now().isoformat()
     
     if not data or 'user' not in data:
-        return jsonify({'error': 'Invalid data'}), 400
+        return jsonify({'error': 'Invalid data: "user" key missing'}), 400
     
     user_data = data['user']
     
@@ -122,7 +156,7 @@ def get_user_info():
             username = excluded.username,
             language_code = excluded.language_code,
             is_premium = excluded.is_premium,
-            last_seen = excluded.last_seen,
+            last_seen = ?,
             interactions = interactions + 1
         ''', (
             user_data['id'],
@@ -131,8 +165,8 @@ def get_user_info():
             user_data.get('username'),
             user_data.get('language_code'),
             user_data.get('is_premium', False),
-            now,
-            now
+            now, # created_at for new user
+            now  # last_seen updated for existing/new user
         ))
         
         # Record session
@@ -180,6 +214,8 @@ def get_user_info():
         })
     
     except Exception as e:
+        # Proper error handling and logging
+        print(f"Error in get_user_info: {e}")
         return jsonify({'error': str(e)}), 500
 
 # Analytics Endpoints
