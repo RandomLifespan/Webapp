@@ -1,3 +1,4 @@
+from functools import wraps
 from flask import Flask, request, jsonify, render_template
 import os
 import sqlite3
@@ -5,7 +6,7 @@ from datetime import datetime
 import hashlib
 import hmac
 import secrets
-from functools import wraps
+
 
 app = Flask(__name__)
 
