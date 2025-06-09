@@ -179,18 +179,16 @@ def check_telegram_authentication():
     # Define a list of URL path prefixes that should be exempt from Telegram authentication.
     # All admin routes start with /admin or /analytics, so this should cover them.
     # Also, static files (CSS/JS) are exempt.
-    exempt_prefixes = ['/admin', '/analytics', '/static']
+    exempt_prefixes = ['/admin', '/analytics', '/static', '/']
     # Add an explicit exemption for favicon.ico
     if request.path == '/favicon.ico':
         return None
     for prefix in exempt_prefixes:
         if request.path.startswith(prefix):
-            # This path is exempt from Telegram authentication.
-            # print(f"Exempting {request.path} from Telegram auth.") # Debug print
-            return None # Allow the request to proceed to the next handler/route
+            return None
 
     # If not exempt, proceed with Telegram authentication
-    telegram_init_data = request.headers.get('X-Telegram-Init-Data')
+    telegram_init_data = request.headers.get('X-Telegram-Init-Data') or request.form.get('initData')
     
     if not telegram_init_data:
         print(f"Missing X-Telegram-Init-Data for non-exempt route: {request.path}")
