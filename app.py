@@ -360,7 +360,7 @@ def admin_users():
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         
         search_query = request.args.get('query', '').strip()
-        sort_by = request.args.get('sort', 'recent')
+        sort_by = request.args.get('sort', 'recent') # 'recent', 'oldest', 'most_interactions'
 
         sql_query = "SELECT * FROM users"
         params = []
@@ -379,16 +379,12 @@ def admin_users():
         else: # Default to recent if invalid sort_by
             sql_query += " ORDER BY last_seen DESC"
 
-        sql_query += " LIMIT 100"
+        sql_query += " LIMIT 100" # Still limit for performance on the main page
 
         cur.execute(sql_query, params)
         users = cur.fetchall()
         
-        # --- REVERT THIS LINE TO RENDER THE TEMPLATE ---
-        return render_template('admin.html', users=[dict(user) for user in users])
-        # --- Keep the JS fetching in admin.html for search/sort/details API calls ---
-        # return jsonify([dict(user) for user in users]) # DELETE or comment out this line
-
+        return jsonify([dict(user) for user in users])
     except Exception as e:
         print(f"Error fetching admin users: {e}")
         return jsonify({'error': 'Failed to retrieve user data: ' + str(e)}), 500
