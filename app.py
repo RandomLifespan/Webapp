@@ -140,9 +140,28 @@ def validate_telegram_data(init_data_raw):
 
     return True
 
+# --- Admin protection middleware (MOVED HERE) ---
+def check_admin_credentials(username, password):
+    correct_username = os.environ.get('ADMIN_USERNAME', 'admin')
+    correct_password = os.environ.get('ADMIN_PASSWORD', 'securepassword')
+    return username == correct_username and password == correct_password
+
+def require_admin_auth(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth = request.authorization
+        if not auth or not check_admin_credentials(auth.username, auth.password):
+            return 'Could not verify your access level for that URL.\n' \
+                   'You have to login with proper credentials', 401, \
+                   {'WWW-Authenticate': 'Basic realm="Login Required"'}
+        return f(*args, **kwargs)
+    return decorated
+
 # --- Middleware for Telegram Authentication ---
 @app.before_request
 def check_telegram_authentication():
+    # Only exempt endpoints that don't need Telegram auth.
+    # Admin routes will use their own Basic Auth.
     exempt_endpoints = [
         'index', 'static', 'admin_users', 'user_count', 
         'user_growth', 'top_events', 'get_user_profile', 
@@ -332,23 +351,6 @@ def top_events():
         if conn:
             conn.close()
 
-# --- Admin protection middleware ---
-def require_admin_auth(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        auth = request.authorization
-        if not auth or not check_admin_credentials(auth.username, auth.password):
-            return 'Could not verify your access level for that URL.\n' \
-                   'You have to login with proper credentials', 401, \
-                   {'WWW-Authenticate': 'Basic realm="Login Required"'}
-        return f(*args, **kwargs)
-    return decorated    
-
-def check_admin_credentials(username, password):
-    correct_username = os.environ.get('ADMIN_USERNAME', 'admin')
-    correct_password = os.environ.get('ADMIN_PASSWORD', 'securepassword')
-    return username == correct_username and password == correct_password
-
 @app.route('/admin/users')
 @require_admin_auth
 def admin_users():
@@ -382,7 +384,6 @@ def admin_users():
         cur.execute(sql_query, params)
         users = cur.fetchall()
         
-        # The admin.html now fetches data via JS, so this route returns JSON
         return jsonify([dict(user) for user in users])
     except Exception as e:
         print(f"Error fetching admin users: {e}")
