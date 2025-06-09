@@ -66,15 +66,22 @@
         const usernameSpan = document.getElementById('username');
         const statusMessage = document.getElementById('statusMessage');
 
+        // --- DEBUG ALERTS (REMOVE IN PRODUCTION) ---
+        alert('JS in index.html is running!');
+
         // Check if Telegram Web App is ready and available
         if (Telegram && Telegram.WebApp) {
+            alert('Telegram WebApp object found!'); // DEBUG
             Telegram.WebApp.ready();
             Telegram.WebApp.expand(); // Optional: expand the mini app to full screen
 
             const initData = Telegram.WebApp.initData;
             const user = Telegram.WebApp.initDataUnsafe.user; // Parsed user object
 
-            if (user) {
+            alert('initData content: ' + (initData ? initData.substring(0, 50) + '...' : 'empty/null')); // DEBUG: Show part of initData
+            alert('User ID from initDataUnsafe: ' + (user ? user.id : 'User object missing')); // DEBUG: Check user ID
+
+            if (user && initData) { // Ensure both user and initData are present
                 // Display user info immediately from initDataUnsafe
                 userIdSpan.textContent = user.id || 'N/A';
                 firstNameSpan.textContent = user.first_name || 'N/A';
@@ -129,9 +136,9 @@
                 });
 
             } else {
-                statusMessage.textContent = 'Error: Telegram user data not available.';
+                statusMessage.textContent = 'Error: Telegram user data or initData not available.';
                 statusMessage.className = 'error';
-                console.error('Telegram.WebApp.initDataUnsafe.user is missing.');
+                console.error('Telegram.WebApp.initDataUnsafe.user or initData is missing.');
             }
 
         } else {
