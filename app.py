@@ -1,14 +1,14 @@
-from functools import wraps
-from flask import Flask, request, jsonify, render_template, redirect, url_for, g
 import os
 import psycopg2
-from psycopg2 import extras # Needed for RealDictCursor
+from psycopg2 import extras
 from datetime import datetime, timedelta
 import hashlib
 import hmac
 import secrets
 import urllib.parse
 import json
+import logging
+from logging.handlers import RotatingFileHandler
 
 app = Flask(__name__)
 
@@ -16,25 +16,27 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 app.config['TELEGRAM_BOT_TOKEN'] = os.environ.get('TELEGRAM_BOT_TOKEN', '')
 
-# --- PostgreSQL Database Connection ---
+# Configure logging
+handler = RotatingFileHandler('app.log', maxBytes=10000, backupCount=3)
+handler.setLevel(logging.DEBUG)
+app.logger.addHandler(handler)
+app.logger.setLevel(logging.DEBUG)
+
+# Database Connection
 def get_db_connection():
     try:
         db_url = os.environ.get('DATABASE_URL')
         if not db_url:
-            print("DATABASE_URL environment variable is not set. Cannot connect to DB.")
-            raise ValueError("DATABASE_URL environment variable is not set.")
+            app.logger.error("DATABASE_URL environment variable is not set")
+            raise ValueError("DATABASE_URL not set")
 
         conn = psycopg2.connect(db_url)
         return conn
     except Exception as e:
-        print(f"Error connecting to PostgreSQL database: {e}")
-        # Re-raise to ensure the error propagates and is caught by the route's try-except
+        app.logger.error(f"Error connecting to PostgreSQL: {e}")
         raise
 
 def init_db():
-    # Use app.app_context() only if you are calling this outside of a request context
-    # For a simple script, it's fine, but typically handled by your web server
-    # when the app starts.
     conn = None
     try:
         conn = get_db_connection()
@@ -78,230 +80,237 @@ def init_db():
             FOREIGN KEY (user_id) REFERENCES users (user_id) ON DELETE CASCADE
         );
         ''')
+        
         conn.commit()
-        print("PostgreSQL tables checked/created successfully.")
+        app.logger.info("Database tables initialized successfully")
     except Exception as e:
-        print(f"Error initializing PostgreSQL database: {e}")
+        app.logger.error(f"Error initializing database: {e}")
         if conn:
             conn.rollback()
-        # Re-raise the exception to indicate a critical startup failure
         raise
     finally:
         if conn:
             conn.close()
 
-# Call init_db during application startup
 init_db()
 
-
-# --- Security helper functions ---
+# Security Helpers
 def validate_telegram_data(init_data_raw):
     if not app.config['TELEGRAM_BOT_TOKEN']:
-        print("TELEGRAM_BOT_TOKEN is not set in app.config!")
+        app.logger.error("TELEGRAM_BOT_TOKEN not configured")
         return False
 
-    params = urllib.parse.parse_qs(init_data_raw)
-    data_check_string_parts = []
-    hash_value = None
+    try:
+        params = urllib.parse.parse_qs(init_data_raw)
+        data_check_string_parts = []
+        hash_value = None
 
-    for key, value in sorted(params.items()):
-        current_value = value[0] if isinstance(value, list) else value
-        
-        if key == 'hash':
-            hash_value = current_value
-        else:
-            data_check_string_parts.append(f"{key}={current_value}")
+        for key, value in sorted(params.items()):
+            current_value = value[0] if isinstance(value, list) else value
+            
+            if key == 'hash':
+                hash_value = current_value
+            else:
+                data_check_string_parts.append(f"{key}={current_value}")
 
-    data_check_string = '\n'.join(data_check_string_parts)
+        data_check_string = '\n'.join(data_check_string_parts)
 
-    if not hash_value:
-        print("Hash value not found in init_data.")
-        return False
-
-    secret_key = hmac.new(
-        key="WebAppData".encode('utf-8'),
-        msg=app.config['TELEGRAM_BOT_TOKEN'].encode('utf-8'),
-        digestmod=hashlib.sha256
-    ).digest()
-
-    calculated_hash = hmac.new(
-        key=secret_key,
-        msg=data_check_string.encode('utf-8'),
-        digestmod=hashlib.sha256
-    ).hexdigest()
-
-    if not hmac.compare_digest(calculated_hash, hash_value):
-        print(f"Validation failed: Calculated hash {calculated_hash} != Provided hash {hash_value}")
-        return False
-    
-    auth_date_str = params.get('auth_date', [None])[0]
-    if auth_date_str:
-        try:
-            auth_date = datetime.fromtimestamp(int(auth_date_str))
-            if datetime.now() - auth_date > timedelta(seconds=3600):
-                print("Telegram init_data is too old.")
-                return False
-        except ValueError:
-            print("Invalid auth_date format.")
+        if not hash_value:
+            app.logger.error("Hash value missing in init_data")
             return False
-    
-    # Store user data in g for the request
-    user_data_json = params.get('user', [None])[0]
-    if user_data_json:
-        g.telegram_user = json.loads(user_data_json)
-    else:
-        g.telegram_user = None # Or a default empty dict if you prefer
-        print("Warning: Telegram init data missing 'user' object.")
 
-    return True
+        secret_key = hmac.new(
+            key="WebAppData".encode('utf-8'),
+            msg=app.config['TELEGRAM_BOT_TOKEN'].encode('utf-8'),
+            digestmod=hashlib.sha256
+        ).digest()
 
-# --- Admin protection middleware ---
-def check_admin_credentials(username, password):
-    correct_username = os.environ.get('ADMIN_USERNAME', 'admin')
-    correct_password = os.environ.get('ADMIN_PASSWORD', 'securepassword')
-    return username == correct_username and password == correct_password
+        calculated_hash = hmac.new(
+            key=secret_key,
+            msg=data_check_string.encode('utf-8'),
+            digestmod=hashlib.sha256
+        ).hexdigest()
 
-def require_admin_auth(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        auth = request.authorization
-        if not auth or not check_admin_credentials(auth.username, auth.password):
-            print(f"Admin auth failed for {request.path}") # Debug print
-            return 'Could not verify your access level for that URL.\n' \
-                   'You have to login with proper credentials', 401, \
-                   {'WWW-Authenticate': 'Basic realm="Login Required"'}
-        return f(*args, **kwargs)
-    return decorated
+        if not hmac.compare_digest(calculated_hash, hash_value):
+            app.logger.error(f"Hash mismatch: {calculated_hash} vs {hash_value}")
+            return False
+        
+        auth_date_str = params.get('auth_date', [None])[0]
+        if auth_date_str:
+            try:
+                auth_date = datetime.fromtimestamp(int(auth_date_str))
+                if datetime.now() - auth_date > timedelta(seconds=3600):
+                    app.logger.error("Telegram auth data expired")
+                    return False
+            except ValueError:
+                app.logger.error("Invalid auth_date format")
+                return False
+        
+        user_data_json = params.get('user', [None])[0]
+        if user_data_json:
+            try:
+                g.telegram_user = json.loads(user_data_json)
+                app.logger.debug(f"Telegram user data: {g.telegram_user}")
+            except json.JSONDecodeError:
+                app.logger.error("Invalid user JSON data")
+                return False
+        else:
+            app.logger.error("Missing user data in init_data")
+            return False
 
-# --- Middleware for Telegram Authentication ---
+        return True
+
+    except Exception as e:
+        app.logger.error(f"Error validating Telegram data: {e}")
+        return False
+
+# Middleware
 @app.before_request
 def check_telegram_authentication():
-    # Define a list of URL path prefixes that should be exempt from Telegram authentication.
-    # All admin routes start with /admin or /analytics, so this should cover them.
-    # Also, static files (CSS/JS) are exempt.
     exempt_prefixes = ['/admin', '/analytics', '/static', '/']
-    # Add an explicit exemption for favicon.ico
+    
     if request.path == '/favicon.ico':
         return None
+        
     for prefix in exempt_prefixes:
         if request.path.startswith(prefix):
             return None
 
-    # If not exempt, proceed with Telegram authentication
-    telegram_init_data = request.headers.get('X-Telegram-Init-Data') or request.form.get('initData')
+    telegram_init_data = request.headers.get('X-Telegram-Init-Data')
     
     if not telegram_init_data:
-        print(f"Missing X-Telegram-Init-Data for non-exempt route: {request.path}")
-        return jsonify({'error': 'Unauthorized: Missing X-Telegram-Init-Data header'}), 401
+        app.logger.error(f"Missing X-Telegram-Init-Data for {request.path}")
+        return jsonify({'error': 'Missing authentication data'}), 401
 
     if not validate_telegram_data(telegram_init_data):
-        return jsonify({'error': 'Unauthorized: Invalid Telegram data'}), 401
-    
-    # If validation passes, user data is in g.telegram_user
-    # You might want to log/update user here for every request, or just rely on /get_user_info
-    pass # Let the request proceed
+        return jsonify({'error': 'Invalid authentication'}), 401
 
-
-# --- Routes ---
-
+# Routes
 @app.route('/')
 def index():
     return render_template('index.html')
 
 @app.route('/get_user_info', methods=['POST'])
 def get_user_info():
-    # We expect g.telegram_user to be set by the before_request middleware
     if not hasattr(g, 'telegram_user') or not g.telegram_user:
-        return jsonify({'error': 'Telegram user data not found in request context.'}), 400
+        app.logger.error("No telegram_user in request context")
+        return jsonify({'error': 'User data missing'}), 400
 
-    user_data = g.telegram_user # Get user data from g object
+    user_data = g.telegram_user
+    if 'id' not in user_data:
+        app.logger.error("User ID missing in Telegram data")
+        return jsonify({'error': 'Invalid user data'}), 400
+
     now = datetime.now()
-    
     conn = None
     try:
         conn = get_db_connection()
         cur = conn.cursor()
         
-        ip = request.headers.get('X-Forwarded-For', request.remote_addr)
-        user_agent = request.headers.get('User-Agent')
-        referrer = request.headers.get('Referer')
-        
-        # PostgreSQL UPSERT (INSERT ... ON CONFLICT)
+        # Try to update existing user first
         cur.execute('''
-        INSERT INTO users 
-            (user_id, first_name, last_name, username, language_code, is_premium, created_at, last_seen, interactions)
-        VALUES 
-            (%s, %s, %s, %s, %s, %s, %s, %s, 1)
-        ON CONFLICT(user_id) DO UPDATE SET
-            first_name = EXCLUDED.first_name,
-            last_name = EXCLUDED.last_name,
-            username = EXCLUDED.username,
-            language_code = EXCLUDED.language_code,
-            is_premium = EXCLUDED.is_premium,
+        UPDATE users SET
+            first_name = %s,
+            last_name = %s,
+            username = %s,
+            language_code = %s,
+            is_premium = %s,
             last_seen = %s,
-            interactions = users.interactions + 1
+            interactions = interactions + 1
+        WHERE user_id = %s
+        RETURNING id
         ''', (
-            user_data['id'],
             user_data.get('first_name'),
             user_data.get('last_name'),
             user_data.get('username'),
             user_data.get('language_code'),
             user_data.get('is_premium', False),
             now,
-            now,
-            now # last_seen for update
+            user_data['id']
         ))
         
+        updated_user = cur.fetchone()
+        
+        if not updated_user:
+            # Insert new user if update didn't affect any rows
+            app.logger.info(f"Creating new user: {user_data['id']}")
+            cur.execute('''
+            INSERT INTO users (
+                user_id, first_name, last_name, username, 
+                language_code, is_premium, created_at, last_seen
+            ) VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s
+            ) RETURNING id
+            ''', (
+                user_data['id'],
+                user_data.get('first_name'),
+                user_data.get('last_name'),
+                user_data.get('username'),
+                user_data.get('language_code'),
+                user_data.get('is_premium', False),
+                now,
+                now
+            ))
+            new_user = cur.fetchone()
+            app.logger.info(f"Created new user with ID: {new_user[0]}")
+
+        # Log session
         session_id = hashlib.sha256(f"{user_data['id']}{now}{secrets.token_hex(8)}".encode()).hexdigest()
         cur.execute('''
-        INSERT INTO user_sessions 
-            (session_id, user_id, ip_address, user_agent, referrer, created_at, last_activity)
-        VALUES 
-            (%s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO user_sessions (
+            session_id, user_id, ip_address, user_agent, 
+            referrer, created_at, last_activity
+        ) VALUES (
+            %s, %s, %s, %s, %s, %s, %s
+        )
         ''', (
             session_id,
             user_data['id'],
-            ip,
-            user_agent,
-            referrer,
+            request.headers.get('X-Forwarded-For', request.remote_addr),
+            request.headers.get('User-Agent'),
+            request.headers.get('Referer'),
             now,
             now
         ))
         
+        # Log event
         cur.execute('''
-        INSERT INTO user_events 
-            (user_id, event_type, event_data, created_at)
-        VALUES 
-            (%s, %s, %s, %s)
+        INSERT INTO user_events (
+            user_id, event_type, event_data, created_at
+        ) VALUES (
+            %s, %s, %s, %s
+        )
         ''', (
             user_data['id'],
             'mini_app_launch',
             json.dumps({
-                'source': 'telegram_mini_app',
-                'user_agent': user_agent
+                'path': request.path,
+                'method': request.method,
+                'user_agent': request.headers.get('User-Agent')
             }),
             now
         ))
         
         conn.commit()
-        
         return jsonify({
             'status': 'success',
             'user_id': user_data['id'],
             'first_name': user_data.get('first_name'),
-            'last_name': user_data.get('last_name'),
             'username': user_data.get('username')
         })
-    
+        
+    except psycopg2.IntegrityError as e:
+        conn.rollback()
+        app.logger.error(f"Database integrity error: {e}")
+        return jsonify({'error': 'User already exists'}), 400
     except Exception as e:
-        print(f"Error in get_user_info: {e}")
         if conn:
             conn.rollback()
-        return jsonify({'error': str(e)}), 500
+        app.logger.error(f"Error in get_user_info: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
     finally:
         if conn:
             conn.close()
-
 # --- Admin Panel Routes ---
 
 @app.route('/admin') # <--- This is the URL that will display admin.html
