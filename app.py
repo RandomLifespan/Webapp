@@ -9,49 +9,12 @@ import hmac
 import secrets
 import urllib.parse
 import json
-from flask_jwt_extended import create_access_token, jwt_required, JWTManager, get_jwt_identity, exceptions as jwt_exceptions
-from flask_cors import CORS
 
 app = Flask(__name__)
 
 # Configuration
-app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', secrets.token_hex(32)) # Renamed to avoid confusion with JWT_SECRET_KEY
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 app.config['TELEGRAM_BOT_TOKEN'] = os.environ.get('TELEGRAM_BOT_TOKEN', '')
-
-# --- JWT Configuration ---
-app.config["JWT_SECRET_KEY"] = os.environ.get('JWT_SECRET_KEY', secrets.token_hex(32)) # Set a strong, unique key
-app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(hours=1) # Token valid for 1 hour
-jwt = JWTManager(app)
-# --- End JWT Configuration ---
-
-CORS(app, resources={r"/*": {"origins": "https://web-production-022e9.up.railway.app"}},
-     supports_credentials=True,
-     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-     headers=["Content-Type", "Authorization"])
-# --- End CORS Configuration ---
-
-# --- JWT Error Handlers (important for clean 401s for admin panel API calls) ---
-@jwt.unauthorized_loader
-def unauthorized_response(callback):
-    # This will be triggered for API calls that are missing a token
-    return jsonify({"msg": "Missing Authorization Header or Token"}), 401
-
-@jwt.invalid_token_loader
-def invalid_token_response(callback):
-    # This will be triggered for API calls with invalid tokens
-    return jsonify({"msg": "Signature verification failed"}), 401
-
-@jwt.expired_token_loader
-def expired_token_response(callback):
-    # This will be triggered for API calls with expired tokens
-    return jsonify({"msg": "Token has expired"}), 401
-
-@jwt.revoked_token_loader
-def revoked_token_response(callback):
-    # This will be triggered for API calls with revoked tokens
-    return jsonify({"msg": "Token has been revoked"}), 401
-# --- End JWT Error Handlers ---
-
 
 # --- PostgreSQL Database Connection ---
 def get_db_connection():
@@ -133,11 +96,10 @@ def init_db():
             conn.close()
 
 # Call init_db during application startup
-with app.app_context(): # Run init_db within app context
-    init_db()
+init_db()
 
 
-# --- Security helper functions for Telegram ---
+# --- Security helper functions ---
 def validate_telegram_data(init_data_raw):
     if not app.config['TELEGRAM_BOT_TOKEN']:
         print("TELEGRAM_BOT_TOKEN is not set in app.config!")
@@ -181,7 +143,6 @@ def validate_telegram_data(init_data_raw):
     if auth_date_str:
         try:
             auth_date = datetime.fromtimestamp(int(auth_date_str))
-            # Data should not be older than 1 hour (3600 seconds)
             if datetime.now() - auth_date > timedelta(seconds=3600):
                 print("Telegram init_data is too old.")
                 return False
@@ -199,76 +160,29 @@ def validate_telegram_data(init_data_raw):
 
     return True
 
-# --- Admin Authentication (JWT-based) ---
-def get_admin_credentials():
-    """Retrieve admin username and password from environment variables."""
-    return {
-        "username": os.environ.get('ADMIN_USERNAME', 'admin'),
-        "password": os.environ.get('ADMIN_PASSWORD', 'securepassword') # NEVER use default 'securepassword' in production
-    }
+# --- Admin protection middleware ---
+def check_admin_credentials(username, password):
+    correct_username = os.environ.get('ADMIN_USERNAME', 'admin')
+    correct_password = os.environ.get('ADMIN_PASSWORD', 'securepassword')
+    return username == correct_username and password == correct_password
 
 def require_admin_auth(f):
-    """
-    Decorator to protect admin routes with JWT and check for admin role.
-    Redirects to login page if token is missing/invalid for HTML requests.
-    Returns JSON errors for API requests.
-    """
     @wraps(f)
-    def decorated_function(*args, **kwargs):
-        try:
-            # The jwt_required() decorator will try to verify the token.
-            # If verification fails, it will raise one of the jwt_exceptions.
-            # If successful, it sets current_user_identity.
-            # We call it here to trigger its checks.
-            jwt_required()(f)(*args, **kwargs) 
+    def decorated(*args, **kwargs):
+        auth = request.authorization
+        if not auth or not check_admin_credentials(auth.username, auth.password):
+            print(f"Admin auth failed for {request.path}")
+            return 'Could not verify your access level for that URL.\n' \
+                   'You have to login with proper credentials', 401, \
+                   {'WWW-Authenticate': 'Basic realm="Login Required"'}
+        return f(*args, **kwargs)
+    return decorated
 
-            current_user_identity = get_jwt_identity() # This will only be set if jwt_required() succeeded.
-            admin_creds = get_admin_credentials()
-
-            if current_user_identity != admin_creds["username"]:
-                # User is authenticated with a JWT, but the identity is not the admin username.
-                # This case is less likely for the initial page load, more for specific API calls.
-                return jsonify({"msg": "Admin access required"}), 403
-            
-            # If JWT is valid and identity matches admin username, proceed to the route function.
-            return f(*args, **kwargs)
-
-        except (jwt_exceptions.NoAuthorizationError,
-                jwt_exceptions.InvalidHeaderError,
-                jwt_exceptions.ExpiredSignatureError,
-                jwt_exceptions.RevokedTokenError) as e:
-            
-            # Check if this request is for the main HTML page (e.g., GET to /admin)
-            # and expects HTML in return.
-            # `request.accept_mimetypes.accept_html` is a good way to check if the browser expects HTML.
-            is_html_request = request.method == 'GET' and request.path == '/admin' and 'text/html' in request.headers.get('Accept', '')
-
-            if is_html_request:
-                print(f"DEBUG: Unauthorized HTML request to {request.path}. Redirecting to login.html. Error: {str(e)}")
-                return redirect(url_for('login_html_page'))
-            else:
-                # For all other requests (e.g., API calls from admin.html's JavaScript, or non-HTML requests),
-                # return the JSON error message. Your @jwt.unauthorized_loader etc.
-                # already define these messages, so simply return the appropriate status code
-                # and message derived from the exception.
-                print(f"DEBUG: Unauthorized API request to {request.path}. Returning JSON error. Error: {str(e)}")
-                # Depending on the specific exception, you might want a different message.
-                # For simplicity here, we'll use the default unauthorized message from jwt_exceptions.
-                if isinstance(e, jwt_exceptions.NoAuthorizationError):
-                    return jsonify({"msg": "Missing Authorization Header or Token"}), 401
-                elif isinstance(e, jwt_exceptions.ExpiredSignatureError):
-                    return jsonify({"msg": "Token has expired"}), 401
-                else: # Catch-all for other invalid tokens, revoked, etc.
-                    return jsonify({"msg": "Invalid or revoked token"}), 401
-
-    return decorated_function
-
-# --- Middleware for Telegram Authentication (unchanged) ---
+# --- Middleware for Telegram Authentication ---
 @app.before_request
 def check_telegram_authentication():
     # Define a list of URL path prefixes that should be exempt from Telegram authentication.
-    # Now includes /admin, /analytics, /static, /login, /login.html
-    exempt_prefixes = ['/admin', '/analytics', '/static', '/login', '/login.html']
+    exempt_prefixes = ['/admin', '/analytics', '/static']
     
     # Explicitly exempt the root path '/' and favicon.ico
     if request.path == '/' or request.path == '/favicon.ico':
@@ -494,29 +408,9 @@ def get_user_info():
         if conn:
             conn.close()
 
-# --- Admin Panel Login Route ---
-@app.route('/login', methods=['POST'])
-def admin_login():
-    """Handles admin login and issues a JWT token."""
-    username = request.json.get('username', None)
-    password = request.json.get('password', None)
+# --- Admin Panel Routes ---
 
-    admin_creds = get_admin_credentials()
-
-    if username == admin_creds["username"] and password == admin_creds["password"]:
-        access_token = create_access_token(identity=username)
-        return jsonify(access_token=access_token)
-    else:
-        return jsonify({"msg": "Bad username or password"}), 401
-
-@app.route('/login.html')
-def login_html_page():
-    return render_template('login.html')
-
-
-# --- Admin Panel Routes (protected by JWT) ---
-
-@app.route('/admin') # This is the URL that will display admin.html
+@app.route('/admin') # <--- This is the URL that will display admin.html
 @require_admin_auth
 def admin_panel():
     return render_template('admin.html')
@@ -611,9 +505,7 @@ def admin_users():
         params = []
         
         if search_query:
-            sql_query += " WHERE user_id::text ILIKE %s OR username ILIKE %s OR first_name ILIKE %s OR last_name ILIKE %s"
-            params.append(f"%{search_query}%")
-            params.append(f"%{search_query}%")
+            sql_query += " WHERE user_id::text ILIKE %s OR username ILIKE %s"
             params.append(f"%{search_query}%")
             params.append(f"%{search_query}%")
 
@@ -721,5 +613,4 @@ def delete_user_data(user_id):
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    # In a production environment, set debug=False for security and performance.
     app.run(host='0.0.0.0', port=port, debug=True)
