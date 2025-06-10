@@ -25,7 +25,7 @@ app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(hours=1) # Token valid for 1 
 jwt = JWTManager(app)
 # --- End JWT Configuration ---
 
-CORS(app, resources={r"/*": {"origins": "https://my-frontend-app.com"}},
+CORS(app, resources={r"/*": {"origins": "https://web-production-022e9.up.railway.app"}},
      supports_credentials=True,
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
      headers=["Content-Type", "Authorization"])
