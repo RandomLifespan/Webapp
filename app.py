@@ -10,8 +10,7 @@ import secrets
 import urllib.parse
 import json
 from flask_jwt_extended import create_access_token, jwt_required, JWTManager, get_jwt_identity, exceptions as jwt_exceptions
-from flask_cors import CORS 
-
+from flask_cors import CORS
 
 app = Flask(__name__)
 
@@ -30,21 +29,26 @@ CORS(app, resources={r"/*": {"origins": "https://web-production-022e9.up.railway
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
      headers=["Content-Type", "Authorization"])
 # --- End CORS Configuration ---
-# --- JWT Error Handlers (important for clean 401s for admin panel) ---
+
+# --- JWT Error Handlers (important for clean 401s for admin panel API calls) ---
 @jwt.unauthorized_loader
 def unauthorized_response(callback):
+    # This will be triggered for API calls that are missing a token
     return jsonify({"msg": "Missing Authorization Header or Token"}), 401
 
 @jwt.invalid_token_loader
 def invalid_token_response(callback):
+    # This will be triggered for API calls with invalid tokens
     return jsonify({"msg": "Signature verification failed"}), 401
 
 @jwt.expired_token_loader
 def expired_token_response(callback):
+    # This will be triggered for API calls with expired tokens
     return jsonify({"msg": "Token has expired"}), 401
 
 @jwt.revoked_token_loader
 def revoked_token_response(callback):
+    # This will be triggered for API calls with revoked tokens
     return jsonify({"msg": "Token has been revoked"}), 401
 # --- End JWT Error Handlers ---
 
@@ -204,26 +208,67 @@ def get_admin_credentials():
     }
 
 def require_admin_auth(f):
-    """Decorator to protect admin routes with JWT and check for admin role."""
+    """
+    Decorator to protect admin routes with JWT and check for admin role.
+    Redirects to login page if token is missing/invalid for HTML requests.
+    Returns JSON errors for API requests.
+    """
     @wraps(f)
-    @jwt_required() # Require a valid JWT token
     def decorated_function(*args, **kwargs):
-        current_user_identity = get_jwt_identity() # Get the identity from the JWT (which is the username)
-        admin_creds = get_admin_credentials()
+        try:
+            # The jwt_required() decorator will try to verify the token.
+            # If verification fails, it will raise one of the jwt_exceptions.
+            # If successful, it sets current_user_identity.
+            # We call it here to trigger its checks.
+            jwt_required()(f)(*args, **kwargs) 
 
-        # Simple check: Is the logged-in user the configured admin username?
-        # In a real app, you'd have a 'roles' field in your DB and check that.
-        if current_user_identity != admin_creds["username"]:
-            return jsonify({"msg": "Admin access required"}), 403
-        
-        return f(*args, **kwargs)
+            current_user_identity = get_jwt_identity() # This will only be set if jwt_required() succeeded.
+            admin_creds = get_admin_credentials()
+
+            if current_user_identity != admin_creds["username"]:
+                # User is authenticated with a JWT, but the identity is not the admin username.
+                # This case is less likely for the initial page load, more for specific API calls.
+                return jsonify({"msg": "Admin access required"}), 403
+            
+            # If JWT is valid and identity matches admin username, proceed to the route function.
+            return f(*args, **kwargs)
+
+        except (jwt_exceptions.NoAuthorizationError,
+                jwt_exceptions.InvalidHeaderError,
+                jwt_exceptions.DecodeError,
+                jwt_exceptions.ExpiredSignatureError,
+                jwt_exceptions.RevokedTokenError) as e:
+            
+            # Check if this request is for the main HTML page (e.g., GET to /admin)
+            # and expects HTML in return.
+            # `request.accept_mimetypes.accept_html` is a good way to check if the browser expects HTML.
+            is_html_request = request.method == 'GET' and request.path == '/admin' and 'text/html' in request.headers.get('Accept', '')
+
+            if is_html_request:
+                print(f"DEBUG: Unauthorized HTML request to {request.path}. Redirecting to login.html. Error: {str(e)}")
+                return redirect(url_for('login_html_page'))
+            else:
+                # For all other requests (e.g., API calls from admin.html's JavaScript, or non-HTML requests),
+                # return the JSON error message. Your @jwt.unauthorized_loader etc.
+                # already define these messages, so simply return the appropriate status code
+                # and message derived from the exception.
+                print(f"DEBUG: Unauthorized API request to {request.path}. Returning JSON error. Error: {str(e)}")
+                # Depending on the specific exception, you might want a different message.
+                # For simplicity here, we'll use the default unauthorized message from jwt_exceptions.
+                if isinstance(e, jwt_exceptions.NoAuthorizationError):
+                    return jsonify({"msg": "Missing Authorization Header or Token"}), 401
+                elif isinstance(e, jwt_exceptions.ExpiredSignatureError):
+                    return jsonify({"msg": "Token has expired"}), 401
+                else: # Catch-all for other invalid tokens, revoked, etc.
+                    return jsonify({"msg": "Invalid or revoked token"}), 401
+
     return decorated_function
 
 # --- Middleware for Telegram Authentication (unchanged) ---
 @app.before_request
 def check_telegram_authentication():
     # Define a list of URL path prefixes that should be exempt from Telegram authentication.
-    # Now includes /admin_login and /login.html
+    # Now includes /admin, /analytics, /static, /login, /login.html
     exempt_prefixes = ['/admin', '/analytics', '/static', '/login', '/login.html']
     
     # Explicitly exempt the root path '/' and favicon.ico
@@ -677,4 +722,5 @@ def delete_user_data(user_id):
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
+    # In a production environment, set debug=False for security and performance.
     app.run(host='0.0.0.0', port=port, debug=True)
