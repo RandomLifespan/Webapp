@@ -856,10 +856,10 @@
             const adminLoggedIn = sessionStorage.getItem('adminLoggedIn');
 
             if (!adminLoggedIn) {
-                console.log("Not logged in. Redirecting to login page.");
+                sessionStorage.removeItem('adminLoggedIn')
                 window.location.href = '/admin/login';
+                return;
             } else {
-                console.log("Admin logged in. Loading dashboard data.");
                 fetchOverviewData();
                 fetchAndDisplayUsers();
             }
