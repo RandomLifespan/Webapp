@@ -192,9 +192,9 @@
 
         // --- AUTHENTICATION RELATED FUNCTIONS ---
 
-        // Function to get the JWT token from sessionStorage
+        // Function to get the JWT token from localStorage (recommended for persistence)
         function getAuthToken() {
-            return sessionStorage.getItem('authToken');
+            return localStorage.getItem('access_token'); // Changed to localStorage and 'access_token'
         }
 
         // Function to set the username in the navbar
@@ -211,6 +211,9 @@
                 } catch (e) {
                     console.error("Failed to decode token:", e);
                     loggedInUserSpan.textContent = 'Logged in (Invalid Token)';
+                    // Optionally, clear invalid token and redirect if it's consistently failing
+                    // localStorage.removeItem('access_token');
+                    // window.location.href = '/login.html';
                 }
             } else {
                 loggedInUserSpan.textContent = 'Not Logged In';
@@ -232,11 +235,14 @@
                 const response = await originalFetch(url, options);
 
                 // Handle 401 Unauthorized globally
-                if (response.status === 401) {
+                if (response.status === 401 || response.status === 403) { // Also check for 403
+                    console.warn(`Authentication issue (${response.status}). Redirecting to login.`);
                     alert('Session expired or unauthorized. Please log in again.');
-                    sessionStorage.removeItem('authToken'); // Clear invalid token
+                    localStorage.removeItem('access_token'); // Clear invalid token
                     window.location.href = '/login.html'; // Redirect to login page
-                    return response; // Return response to prevent further processing
+                    // Important: Instead of returning response here, throw an error or handle it
+                    // so that the calling function doesn't try to process an unauthorized response.
+                    throw new Error('Unauthorized or Forbidden access.');
                 }
 
                 return response;
@@ -248,7 +254,7 @@
 
         // Logout function
         logoutButton.addEventListener('click', () => {
-            sessionStorage.removeItem('authToken'); // Clear the token
+            localStorage.removeItem('access_token'); // Changed to localStorage
             alert('You have been logged out.');
             window.location.href = '/login.html'; // Redirect to login page
         });
@@ -285,9 +291,14 @@
 
             } catch (error) {
                 console.error('Network or unhandled error fetching overview data:', error);
-                document.getElementById('totalUsers').textContent = 'Error (Client)';
-                document.getElementById('activeToday').textContent = 'Error (Client)';
-                document.getElementById('topEventType').textContent = 'Error (Client)';
+                // The global fetch wrapper already handles redirection for 401/403,
+                // so we don't need redundant alerts or redirections here for those specific errors.
+                // For other network errors, display a client-side error.
+                if (!error.message.includes('Unauthorized') && !error.message.includes('Forbidden')) {
+                    document.getElementById('totalUsers').textContent = 'Error (Client)';
+                    document.getElementById('activeToday').textContent = 'Error (Client)';
+                    document.getElementById('topEventType').textContent = 'Error (Client)';
+                }
             }
         }
 
@@ -304,7 +315,11 @@
                 renderUserTable(users);
             } catch (error) {
                 console.error('Error fetching users:', error);
-                userTableBody.innerHTML = `<tr><td colspan="8" class="text-center text-danger">Failed to load users: ${error.message}</td></tr>`;
+                if (!error.message.includes('Unauthorized') && !error.message.includes('Forbidden')) {
+                    userTableBody.innerHTML = `<tr><td colspan="8" class="text-center text-danger">Failed to load users: ${error.message}</td></tr>`;
+                } else {
+                    userTableBody.innerHTML = `<tr><td colspan="8" class="text-center text-warning">Authentication required to view users.</td></tr>`;
+                }
             }
         }
 
@@ -336,6 +351,7 @@
 
         function attachViewDetailsListeners() {
             document.querySelectorAll('.view-details-btn').forEach(button => {
+                // Ensure event listener is added only once
                 button.removeEventListener('click', handleViewDetailsClick);
                 button.addEventListener('click', handleViewDetailsClick);
             });
@@ -349,24 +365,12 @@
         async function fetchUserDetails(userId) {
             try {
                 const userRes = await fetch(`/admin/user/${userId}`);
-                if (!userRes.ok) {
-                    const errorText = await userRes.text();
-                    throw new Error(`User not found or API error: ${userRes.status}. Details: ${errorText}`);
-                }
                 const userData = await userRes.json();
 
                 const sessionsRes = await fetch(`/admin/user/${userId}/sessions`);
-                if (!sessionsRes.ok) {
-                    const errorText = await sessionsRes.text();
-                    throw new Error(`Sessions API error: ${sessionsRes.status}. Details: ${errorText}`);
-                }
                 const sessionsData = await sessionsRes.json();
 
                 const eventsRes = await fetch(`/admin/user/${userId}/events`);
-                if (!eventsRes.ok) {
-                    const errorText = await eventsRes.text();
-                    throw new Error(`Events API error: ${eventsRes.status}. Details: ${errorText}`);
-                }
                 const eventsData = await eventsRes.json();
 
                 // Populate modal
@@ -384,6 +388,7 @@
                 // Populate sessions
                 const noSessionsMessage = document.getElementById('noSessionsMessage');
                 const sessionsList = document.getElementById('detailSessionsList');
+                // Clear all but the placeholder message
                 Array.from(sessionsList.children).forEach(child => {
                     if (child.id !== 'noSessionsMessage') {
                         child.remove();
@@ -410,6 +415,7 @@
                 // Populate events
                 const noEventsMessage = document.getElementById('noEventsMessage');
                 const eventsList = document.getElementById('detailEventsList');
+                // Clear all but the placeholder message
                 Array.from(eventsList.children).forEach(child => {
                     if (child.id !== 'noEventsMessage') {
                         child.remove();
