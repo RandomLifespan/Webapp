@@ -216,7 +216,8 @@ def check_telegram_authentication():
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    csrf_token = generate_csrf()
+    return render_template('index.html', csrf_token=csrf_token)
 
 # NEW: Admin Login Route
 @app.route('/admin/login', methods=['GET', 'POST'])
