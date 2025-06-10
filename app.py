@@ -9,10 +9,9 @@ import hmac
 import secrets
 import urllib.parse
 import json
-
-# --- JWT Specific Imports ---
 from flask_jwt_extended import create_access_token, jwt_required, JWTManager, get_jwt_identity, exceptions as jwt_exceptions
-# --- End JWT Specific Imports ---
+from flask_cors import CORS 
+
 
 app = Flask(__name__)
 
@@ -26,6 +25,13 @@ app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(hours=1) # Token valid for 1 
 jwt = JWTManager(app)
 # --- End JWT Configuration ---
 
+CORS(app, resources={r"/https://web-production-022e9.up.railway.app": {"origins": "*"}}, 
+     supports_credentials=True, 
+     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"], # Explicitly allow OPTIONS for preflight
+     headers=["Content-Type", "Authorization"]) # CRITICAL: Allow the Authorization header
+
+
+# --- End CORS Configuration ---
 # --- JWT Error Handlers (important for clean 401s for admin panel) ---
 @jwt.unauthorized_loader
 def unauthorized_response(callback):
