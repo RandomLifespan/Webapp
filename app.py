@@ -447,7 +447,7 @@ def get_user_info():
             conn.close()
 
 # --- Admin Panel Login Route ---
-@app.route('/admin_login', methods=['POST'])
+@app.route('/login', methods=['POST'])
 def admin_login():
     """Handles admin login and issues a JWT token."""
     username = request.json.get('username', None)
