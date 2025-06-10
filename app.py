@@ -235,7 +235,6 @@ def require_admin_auth(f):
 
         except (jwt_exceptions.NoAuthorizationError,
                 jwt_exceptions.InvalidHeaderError,
-                jwt_exceptions.DecodeError,
                 jwt_exceptions.ExpiredSignatureError,
                 jwt_exceptions.RevokedTokenError) as e:
             
