@@ -31,9 +31,10 @@
                     <li class="nav-item">
                         <a class="nav-link active" aria-current="page" href="/admin">Users</a>
                     </li>
-                    </ul>
+                </ul>
                 <span class="navbar-text">
                     Logged in as Admin
+                    <a href="/admin/logout" class="btn btn-sm btn-outline-light ms-2">Logout</a>
                 </span>
             </div>
         </div>
@@ -164,16 +165,14 @@
 
         let currentUsers = []; // Store the currently displayed users
 
-        // --- NEW: Store Basic Auth credentials ---
-        let adminUsername = '';
-        let adminPassword = '';
+        // --- IMPORTANT: Retrieve credentials from sessionStorage after successful login ---
+        let adminUsername = sessionStorage.getItem('adminUsername') || '';
+        let adminPassword = sessionStorage.getItem('adminPassword') || '';
 
         // Function to encode credentials for Basic Auth header
         function getAuthHeaders() {
             if (!adminUsername || !adminPassword) {
-                // If credentials are not set, try to get them (e.g., first load)
-                // This will trigger the browser's native popup
-                // For subsequent calls, we expect them to be set.
+                console.error("Admin credentials not found in sessionStorage. This shouldn't happen after successful login.");
                 return {};
             }
             const credentials = btoa(`${adminUsername}:${adminPassword}`);
@@ -182,24 +181,31 @@
             };
         }
 
-        // --- NEW: Intercept fetch requests to add Auth Headers ---
-        // We'll create a wrapper around the native fetch
+        // --- Intercept fetch requests to add Auth Headers ---
         const originalFetch = window.fetch;
         window.fetch = async function(url, options = {}) {
-            const authHeaders = getAuthHeaders();
-            options.headers = {
-                ...options.headers, // Keep existing headers
-                ...authHeaders      // Add Authorization header
-            };
+            // Only add auth headers to admin-related API calls
+            if (url.startsWith('/admin') || url.startsWith('/analytics')) {
+                const authHeaders = getAuthHeaders();
+                options.headers = {
+                    ...options.headers, // Keep existing headers
+                    ...authHeaders      // Add Authorization header
+                };
+            }
+
             const response = await originalFetch(url, options);
 
             // If a 401 is received, it means our stored credentials might be invalid or expired.
-            // This is where you could prompt the user again, or redirect to a login page.
+            // This is where you would redirect to the login page.
             if (response.status === 401) {
-                console.error("401 Unauthorized received. Stored credentials might be invalid or expired.");
-                // OPTIONAL: You could add logic here to re-prompt the user or reload the page
-                // to trigger the browser's native Basic Auth prompt again.
-                // For simplicity, we'll let the existing error handling catch it.
+                console.error("401 Unauthorized received. Redirecting to login.");
+                // Clear any stored login state and redirect
+                sessionStorage.removeItem('adminLoggedIn');
+                sessionStorage.removeItem('adminUsername');
+                sessionStorage.removeItem('adminPassword');
+                window.location.href = '/admin/login';
+                // Prevent further processing of the 401 response here
+                throw new Error("Unauthorized access. Redirecting to login.");
             }
             return response;
         };
@@ -214,7 +220,7 @@
 
             try {
                 // Fetch user count and active users
-                const userCountRes = await fetch('/analytics/users/count'); // fetch() is now wrapped
+                const userCountRes = await fetch('/analytics/users/count');
                 if (userCountRes.ok) {
                     const userCountData = await userCountRes.json();
                     document.getElementById('totalUsers').textContent = userCountData.total_users || 0;
@@ -227,7 +233,7 @@
                 }
 
                 // Fetch top events
-                const topEventsRes = await fetch('/analytics/events/top'); // fetch() is now wrapped
+                const topEventsRes = await fetch('/analytics/events/top');
                 if (topEventsRes.ok) {
                     const topEventsData = await topEventsRes.json();
                     document.getElementById('topEventType').textContent = topEventsData.length > 0 ? topEventsData[0].event_type : 'N/A';
@@ -250,7 +256,7 @@
         async function fetchAndDisplayUsers(query = '', sort = 'recent') {
             userTableBody.innerHTML = `<tr><td colspan="8" class="text-center">Loading users...</td></tr>`;
             try {
-                const response = await fetch(`/admin/users?query=${encodeURIComponent(query)}&sort=${sort}`); // fetch() is now wrapped
+                const response = await fetch(`/admin/users?query=${encodeURIComponent(query)}&sort=${sort}`);
                 if (!response.ok) {
                     const errorText = await response.text();
                     throw new Error(`HTTP error! Status: ${response.status}. Details: ${errorText}`);
@@ -308,7 +314,7 @@
         async function fetchUserDetails(userId) {
             try {
                 // Fetch user profile
-                const userRes = await fetch(`/admin/user/${userId}`); // fetch() is now wrapped
+                const userRes = await fetch(`/admin/user/${userId}`);
                 if (!userRes.ok) {
                     const errorText = await userRes.text();
                     throw new Error(`User not found or API error: ${userRes.status}. Details: ${errorText}`);
@@ -316,7 +322,7 @@
                 const userData = await userRes.json();
 
                 // Fetch user sessions
-                const sessionsRes = await fetch(`/admin/user/${userId}/sessions`); // fetch() is now wrapped
+                const sessionsRes = await fetch(`/admin/user/${userId}/sessions`);
                 if (!sessionsRes.ok) {
                     const errorText = await sessionsRes.text();
                     throw new Error(`Sessions API error: ${sessionsRes.status}. Details: ${errorText}`);
@@ -324,7 +330,7 @@
                 const sessionsData = await sessionsRes.json();
 
                 // Fetch user events
-                const eventsRes = await fetch(`/admin/user/${userId}/events`); // fetch() is now wrapped
+                const eventsRes = await fetch(`/admin/user/${userId}/events`);
                 if (!eventsRes.ok) {
                     const errorText = await eventsRes.text();
                     throw new Error(`Events API error: ${eventsRes.status}. Details: ${errorText}`);
@@ -346,7 +352,7 @@
                 // Populate sessions
                 const noSessionsMessage = document.getElementById('noSessionsMessage');
                 const sessionsList = document.getElementById('detailSessionsList');
-                
+
                 Array.from(sessionsList.children).forEach(child => {
                     if (child.id !== 'noSessionsMessage') {
                         child.remove();
@@ -374,7 +380,7 @@
                 // Populate events
                 const noEventsMessage = document.getElementById('noEventsMessage');
                 const eventsList = document.getElementById('detailEventsList');
-                
+
                 Array.from(eventsList.children).forEach(child => {
                     if (child.id !== 'noEventsMessage') {
                         child.remove();
@@ -396,7 +402,7 @@
                 } else {
                     noEventsMessage.style.display = 'block';
                 }
-                
+
                 deleteUserButton.dataset.userIdToDelete = userId;
 
                 userDetailModal.show();
@@ -427,7 +433,7 @@
                 try {
                     const response = await fetch(`/admin/user/${userIdToDelete}`, {
                         method: 'DELETE'
-                    }); // fetch() is now wrapped
+                    });
                     if (!response.ok) {
                         const errorText = await response.text();
                         throw new Error(`HTTP error! status: ${response.status}. Details: ${errorText}`);
@@ -450,22 +456,18 @@
             fetchAndDisplayUsers();
         }
 
-        // Initial load
+        // Initial load and session check
         document.addEventListener('DOMContentLoaded', () => {
-            // Check if credentials are in sessionStorage (from a previous successful login)
-            const storedUsername = sessionStorage.getItem('adminUsername');
-            const storedPassword = sessionStorage.getItem('adminPassword');
+            // Check if the user is considered "logged in" from the session
+            const adminLoggedIn = sessionStorage.getItem('adminLoggedIn');
 
-            if (storedUsername && storedPassword) {
-                adminUsername = storedUsername;
-                adminPassword = storedPassword;
-                console.log("Credentials retrieved from sessionStorage.");
+            if (!adminLoggedIn) {
+                console.log("Not logged in. Redirecting to login page.");
+                window.location.href = '/admin/login';
+            } else {
+                console.log("Admin logged in. Loading dashboard data.");
                 fetchOverviewData();
                 fetchAndDisplayUsers();
-            } else {
-                console.log("No stored credentials. Attempting to fetch with browser's default auth.");
-                fetchOverviewData(); // Will trigger auth if not already logged in
-                fetchAndDisplayUsers(); // Will trigger auth if not already logged in
             }
         });
 
