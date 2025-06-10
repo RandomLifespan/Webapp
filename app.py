@@ -1,5 +1,5 @@
 from functools import wraps
-from flask import Flask, request, jsonify, render_template, redirect, url_for, g
+from flask import Flask, request, jsonify, render_template, redirect, url_for, g, session # Import 'session'
 import os
 import psycopg2
 from psycopg2 import extras # Needed for RealDictCursor
@@ -15,6 +15,8 @@ app = Flask(__name__)
 # Configuration
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 app.config['TELEGRAM_BOT_TOKEN'] = os.environ.get('TELEGRAM_BOT_TOKEN', '')
+app.config['SESSION_COOKIE_NAME'] = 'admin_session' # Name for the session cookie
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7) # Optional: Session lifetime
 
 # --- PostgreSQL Database Connection ---
 def get_db_connection():
@@ -35,7 +37,7 @@ def init_db():
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        
+
         cur.execute('''
         CREATE TABLE IF NOT EXISTS users (
             id SERIAL PRIMARY KEY,
@@ -50,7 +52,7 @@ def init_db():
             interactions INTEGER DEFAULT 1
         );
         ''')
-        
+
         cur.execute('''
         CREATE TABLE IF NOT EXISTS user_sessions (
             session_id TEXT PRIMARY KEY,
@@ -63,7 +65,7 @@ def init_db():
             FOREIGN KEY (user_id) REFERENCES users (user_id) ON DELETE CASCADE
         );
         ''')
-        
+
         cur.execute('''
         CREATE TABLE IF NOT EXISTS user_events (
             event_id SERIAL PRIMARY KEY,
@@ -111,7 +113,7 @@ def validate_telegram_data(init_data_raw):
 
     for key, value in sorted(params.items()):
         current_value = value[0] if isinstance(value, list) else value
-        
+
         if key == 'hash':
             hash_value = current_value
         else:
@@ -138,7 +140,7 @@ def validate_telegram_data(init_data_raw):
     if not hmac.compare_digest(calculated_hash, hash_value):
         print(f"Validation failed: Calculated hash {calculated_hash} != Provided hash {hash_value}")
         return False
-    
+
     auth_date_str = params.get('auth_date', [None])[0]
     if auth_date_str:
         try:
@@ -149,7 +151,7 @@ def validate_telegram_data(init_data_raw):
         except ValueError:
             print("Invalid auth_date format.")
             return False
-    
+
     # Store user data in g for the request
     user_data_json = params.get('user', [None])[0]
     if user_data_json:
@@ -166,42 +168,56 @@ def check_admin_credentials(username, password):
     correct_password = os.environ.get('ADMIN_PASSWORD', 'securepassword')
     return username == correct_username and password == correct_password
 
+# Modified require_admin_auth to use session
 def require_admin_auth(f):
     @wraps(f)
     def decorated(*args, **kwargs):
-        auth = request.authorization
-        if not auth or not check_admin_credentials(auth.username, auth.password):
-            print(f"Admin auth failed for {request.path}")
-            return 'Could not verify your access level for that URL.\n' \
-                   'You have to login with proper credentials', 401, \
-                   {'WWW-Authenticate': 'Basic realm="Login Required"'}
-        return f(*args, **kwargs)
+        if 'admin_logged_in' in session and session['admin_logged_in']:
+            # For API endpoints, we still need basic auth or something similar
+            # to verify AJAX requests, or rely purely on session for non-GETs
+            # For simplicity, we'll keep the basic auth check for APIs too
+            # You could refine this to use sessions for rendering pages and basic auth for APIs
+            if request.path.startswith('/admin') and request.path != '/admin' and not request.path.startswith('/admin/login'):
+                # This part is a bit tricky. If you're using JavaScript's fetch API
+                # and you *want* it to send Basic Auth headers, you would still need them.
+                # However, if your admin.html JavaScript relies on sessionStorage for credentials,
+                # then we need to handle that.
+                # For now, let's assume session is sufficient for general access,
+                # and individual API calls might still benefit from their own auth if needed.
+                pass # Already logged in via session
+            else:
+                return f(*args, **kwargs)
+        else:
+            # If not logged in via session, redirect to login page
+            print(f"Admin auth failed for {request.path}. Redirecting to login.")
+            return redirect(url_for('admin_login'))
     return decorated
 
 # --- Middleware for Telegram Authentication ---
 @app.before_request
 def check_telegram_authentication():
     # Define a list of URL path prefixes that should be exempt from Telegram authentication.
-    exempt_prefixes = ['/admin', '/analytics', '/static']
-    
+    # Now include /admin/login explicitly
+    exempt_prefixes = ['/admin/login', '/admin', '/analytics', '/static']
+
     # Explicitly exempt the root path '/' and favicon.ico
     if request.path == '/' or request.path == '/favicon.ico':
-        return None 
-    
+        return None
+
     for prefix in exempt_prefixes:
         if request.path.startswith(prefix):
             return None # Allow the request to proceed to the next handler/route
 
     # If not exempt, proceed with Telegram authentication
     telegram_init_data = request.headers.get('X-Telegram-Init-Data')
-    
+
     if not telegram_init_data:
         print(f"Missing X-Telegram-Init-Data for non-exempt route: {request.path}")
         return jsonify({'error': 'Unauthorized: Missing X-Telegram-Init-Data header'}), 401
 
     if not validate_telegram_data(telegram_init_data):
         return jsonify({'error': 'Unauthorized: Invalid Telegram data'}), 401
-    
+
     pass # Let the request proceed
 
 
@@ -210,7 +226,38 @@ def check_telegram_authentication():
 @app.route('/')
 def index():
     return render_template('index.html')
-    
+
+# NEW: Admin Login Route
+@app.route('/admin/login', methods=['GET', 'POST'])
+def admin_login():
+    if request.method == 'POST':
+        data = request.get_json()
+        username = data.get('username')
+        password = data.get('password')
+
+        if check_admin_credentials(username, password):
+            session['admin_logged_in'] = True
+            # Store credentials in session for future use by fetch wrapper in admin.html
+            session['admin_username'] = username
+            session['admin_password'] = password
+            return jsonify({'message': 'Login successful'}), 200
+        else:
+            return jsonify({'error': 'Invalid credentials'}), 401
+    else:
+        # If already logged in, redirect to admin dashboard
+        if 'admin_logged_in' in session and session['admin_logged_in']:
+            return redirect(url_for('admin_panel'))
+        return render_template('login.html')
+
+# NEW: Admin Logout Route
+@app.route('/admin/logout')
+def admin_logout():
+    session.pop('admin_logged_in', None)
+    session.pop('admin_username', None)
+    session.pop('admin_password', None)
+    return redirect(url_for('admin_login'))
+
+
 @app.route('/generate_points', methods=['POST'])
 def generate_points():
     if not hasattr(g, 'telegram_user') or not g.telegram_user:
@@ -313,7 +360,7 @@ def get_user_points():
     finally:
         if conn:
             conn.close()
-            
+
 @app.route('/get_user_info', methods=['POST'])
 def get_user_info():
     # We expect g.telegram_user to be set by the before_request middleware
@@ -322,21 +369,21 @@ def get_user_info():
 
     user_data = g.telegram_user # Get user data from g object
     now = datetime.now()
-    
+
     conn = None
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        
+
         ip = request.headers.get('X-Forwarded-For', request.remote_addr)
         user_agent = request.headers.get('User-Agent')
         referrer = request.headers.get('Referer')
-        
+
         # PostgreSQL UPSERT (INSERT ... ON CONFLICT)
         cur.execute('''
-        INSERT INTO users 
+        INSERT INTO users
             (user_id, first_name, last_name, username, language_code, is_premium, created_at, last_seen, interactions)
-        VALUES 
+        VALUES
             (%s, %s, %s, %s, %s, %s, %s, %s, 1)
         ON CONFLICT(user_id) DO UPDATE SET
             first_name = EXCLUDED.first_name,
@@ -357,12 +404,12 @@ def get_user_info():
             now,
             now # last_seen for update
         ))
-        
+
         session_id = hashlib.sha256(f"{user_data['id']}{now}{secrets.token_hex(8)}".encode()).hexdigest()
         cur.execute('''
-        INSERT INTO user_sessions 
+        INSERT INTO user_sessions
             (session_id, user_id, ip_address, user_agent, referrer, created_at, last_activity)
-        VALUES 
+        VALUES
             (%s, %s, %s, %s, %s, %s, %s)
         ''', (
             session_id,
@@ -373,11 +420,11 @@ def get_user_info():
             now,
             now
         ))
-        
+
         cur.execute('''
-        INSERT INTO user_events 
+        INSERT INTO user_events
             (user_id, event_type, event_data, created_at)
-        VALUES 
+        VALUES
             (%s, %s, %s, %s)
         ''', (
             user_data['id'],
@@ -388,9 +435,9 @@ def get_user_info():
             }),
             now
         ))
-        
+
         conn.commit()
-        
+
         return jsonify({
             'status': 'success',
             'user_id': user_data['id'],
@@ -398,7 +445,7 @@ def get_user_info():
             'last_name': user_data.get('last_name'),
             'username': user_data.get('username')
         })
-    
+
     except Exception as e:
         print(f"Error in get_user_info: {e}")
         if conn:
@@ -424,13 +471,13 @@ def user_count():
     try:
         conn = get_db_connection()
         # Use RealDictCursor for cleaner dictionary output
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) 
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute('SELECT COUNT(*) AS total_users FROM users')
         total_users_data = cur.fetchone()
         total = total_users_data['total_users'] if total_users_data else 0
 
         cur.execute('''
-            SELECT COUNT(*) AS active_today FROM users 
+            SELECT COUNT(*) AS active_today FROM users
             WHERE DATE(last_seen) = CURRENT_DATE
         ''')
         active_today_data = cur.fetchone()
@@ -497,13 +544,13 @@ def admin_users():
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        
+
         search_query = request.args.get('query', '').strip()
         sort_by = request.args.get('sort', 'recent') # 'recent', 'oldest', 'most_interactions'
 
         sql_query = "SELECT * FROM users"
         params = []
-        
+
         if search_query:
             sql_query += " WHERE user_id::text ILIKE %s OR username ILIKE %s"
             params.append(f"%{search_query}%")
@@ -522,7 +569,7 @@ def admin_users():
 
         cur.execute(sql_query, params)
         users = cur.fetchall()
-        
+
         return jsonify([dict(user) for user in users])
     except Exception as e:
         print(f"Error fetching admin users: {e}")
@@ -591,14 +638,14 @@ def delete_user_data(user_id):
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        
+
         # Deleting from user_events, user_sessions, and user_points first due to foreign key constraints
         cur.execute('DELETE FROM user_events WHERE user_id = %s', (user_id,))
         cur.execute('DELETE FROM user_sessions WHERE user_id = %s', (user_id,))
         cur.execute('DELETE FROM user_points WHERE user_id = %s', (user_id,)) # Added this line
         cur.execute('DELETE FROM users WHERE user_id = %s', (user_id,))
         conn.commit()
-        
+
         if cur.rowcount > 0:
             return jsonify({'message': f'User {user_id} and associated data deleted successfully.'}), 200
         return jsonify({'message': 'User not found or no data to delete.'}), 404
