@@ -45,6 +45,36 @@
         .error {
             color: #dc3545;
         }
+        .points-display {
+            font-size: 1.2em;
+            margin: 20px 0;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            background-color: #e9ecef;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 1em;
+            color: #fff;
+            background-color: #007bff;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+        button:hover:not(:disabled) {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        #cooldown-timer {
+            margin-top: 10px;
+            font-weight: bold;
+            color: #ff5722;
+        }
     </style>
 </head>
 <body>
@@ -56,6 +86,16 @@
             <p><strong>First Name:</strong> <span id="firstName">Loading...</span></p>
             <p><strong>Username:</strong> <span id="username">Loading...</span></p>
         </div>
+
+        <hr>
+
+        <div class="points-section">
+            <h2>Your Points</h2>
+            <p class="points-display">Current Points: <span id="currentPoints">0</span></p>
+            <button id="generatePointsButton">Generate Points</button>
+            <p id="cooldown-timer"></p>
+        </div>
+
         <p id="statusMessage" class="loading">Sending user data...</p>
     </div>
 
@@ -65,34 +105,141 @@
         const firstNameSpan = document.getElementById('firstName');
         const usernameSpan = document.getElementById('username');
         const statusMessage = document.getElementById('statusMessage');
+        const currentPointsSpan = document.getElementById('currentPoints');
+        const generatePointsButton = document.getElementById('generatePointsButton');
+        const cooldownTimerDisplay = document.getElementById('cooldown-timer');
 
-        // Check if Telegram Web App is ready and available
+        let cooldownEndDate = null;
+        const COOLDOWN_MINUTES = 5;
+
+        // Function to update the cooldown timer display
+        function updateCooldownTimer() {
+            if (!cooldownEndDate) {
+                cooldownTimerDisplay.textContent = '';
+                generatePointsButton.disabled = false;
+                return;
+            }
+
+            const now = new Date();
+            const timeLeftSeconds = Math.max(0, Math.floor((cooldownEndDate.getTime() - now.getTime()) / 1000));
+
+            if (timeLeftSeconds <= 0) {
+                cooldownTimerDisplay.textContent = 'You can generate points now!';
+                generatePointsButton.disabled = false;
+                cooldownEndDate = null; // Reset cooldown
+            } else {
+                const minutes = Math.floor(timeLeftSeconds / 60);
+                const seconds = timeLeftSeconds % 60;
+                cooldownTimerDisplay.textContent = `Next points in: ${minutes}m ${seconds}s`;
+                generatePointsButton.disabled = true;
+                setTimeout(updateCooldownTimer, 1000); // Update every second
+            }
+        }
+
+        // Function to fetch user points
+        async function fetchUserPoints() {
+            try {
+                const initData = Telegram.WebApp.initData;
+                const response = await fetch('/get_user_points', {
+                    method: 'GET',
+                    headers: {
+                        'X-Telegram-Init-Data': initData
+                    }
+                });
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || `HTTP error! Status: ${response.status}`);
+                }
+                const data = await response.json();
+                if (data.status === 'success') {
+                    currentPointsSpan.textContent = data.points;
+                    if (data.last_generated_at) {
+                        const lastGenTime = new Date(data.last_generated_at + 'Z'); // Assume UTC from DB
+                        cooldownEndDate = new Date(lastGenTime.getTime() + COOLDOWN_MINUTES * 60 * 1000);
+                    }
+                    updateCooldownTimer(); // Start/update the timer
+                } else {
+                    console.error('Failed to fetch points:', data.message);
+                    currentPointsSpan.textContent = 'Error';
+                }
+            } catch (error) {
+                console.error('Error fetching user points:', error);
+                currentPointsSpan.textContent = 'Error';
+            }
+        }
+
+        // Function to handle points generation
+        async function handleGeneratePoints() {
+            generatePointsButton.disabled = true; // Disable button immediately
+            statusMessage.textContent = 'Generating points...';
+            statusMessage.className = 'loading';
+
+            try {
+                const initData = Telegram.WebApp.initData;
+                const response = await fetch('/generate_points', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Telegram-Init-Data': initData
+                    }
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.message || errorData.error || `HTTP error! Status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                if (data.status === 'success') {
+                    statusMessage.textContent = data.message;
+                    statusMessage.className = 'success';
+                    currentPointsSpan.textContent = data.new_total_points;
+                    // Set new cooldown end time
+                    cooldownEndDate = new Date(Date.now() + COOLDOWN_MINUTES * 60 * 1000);
+                    updateCooldownTimer(); // Start the timer
+                } else if (data.status === 'cooldown') {
+                    statusMessage.textContent = data.message;
+                    statusMessage.className = 'error';
+                    // Re-calculate cooldown end time from the server response
+                    cooldownEndDate = new Date(Date.now() + data.cooldown_seconds_left * 1000);
+                    updateCooldownTimer(); // Start the timer
+                } else {
+                    statusMessage.textContent = `Error: ${data.message || 'Unknown error from backend'}`;
+                    statusMessage.className = 'error';
+                    generatePointsButton.disabled = false; // Re-enable on unknown error
+                }
+            } catch (error) {
+                statusMessage.textContent = `Client-side error: ${error.message}`;
+                statusMessage.className = 'error';
+                console.error('Fetch error:', error);
+                generatePointsButton.disabled = false; // Re-enable on error
+            }
+        }
+
+        // Event listener for the button
+        generatePointsButton.addEventListener('click', handleGeneratePoints);
+
+
+        // Initial setup
         if (Telegram && Telegram.WebApp) {
             Telegram.WebApp.ready();
             Telegram.WebApp.expand(); // Optional: expand the mini app to full screen
 
             const initData = Telegram.WebApp.initData;
-            const user = Telegram.WebApp.initDataUnsafe.user; // Parsed user object
+            const user = Telegram.WebApp.initDataUnsafe.user;
 
-            if (user && initData) { // Ensure both user and initData are present
-                // Display user info immediately from initDataUnsafe
+            if (user && initData) {
                 userIdSpan.textContent = user.id || 'N/A';
                 firstNameSpan.textContent = user.first_name || 'N/A';
                 usernameSpan.textContent = user.username || 'N/A';
 
-                // Prepare data to send to your Flask backend
-                const payload = {
-                    user: user // Sending the user object directly
-                };
-
-                // Send data to your Flask backend
                 fetch('/get_user_info', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'X-Telegram-Init-Data': initData // Send the raw initData from Telegram
+                        'X-Telegram-Init-Data': initData
                     },
-                    body: JSON.stringify(payload)
+                    body: JSON.stringify({ user: user })
                 })
                 .then(response => {
                     if (!response.ok) {
@@ -111,6 +258,7 @@
                         statusMessage.textContent = 'User data sent and processed successfully!';
                         statusMessage.className = 'success';
                         console.log('Backend response:', data);
+                        fetchUserPoints(); // Fetch points after user info is processed
                     } else {
                         statusMessage.textContent = `Error: ${data.error || 'Unknown error from backend'}`;
                         statusMessage.className = 'error';
