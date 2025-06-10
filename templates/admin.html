@@ -463,61 +463,11 @@
                 fetchOverviewData();
                 fetchAndDisplayUsers();
             } else {
-                // If no stored credentials, the first fetch will trigger the browser's native prompt
-                // After the user enters credentials, we need to capture them.
-                // This is the tricky part with native Basic Auth.
-                // A common pattern is to just let the browser handle it for the initial load,
-                // and then if a sub-request fails, you might need to re-prompt or handle it
-                // as an expired session.
-                // For this scenario, we'll assume the initial page load (admin.html)
-                // has been authenticated, and the browser will prompt for the first time.
-                // We'll then rely on the *browser's behavior* to send the Authorization header
-                // for the initial admin.html request.
-                // When you make subsequent AJAX calls, the `window.fetch` override will inject them.
-
-                // If the user *just* loaded the page and entered credentials,
-                // the browser *should* send them with subsequent fetches within that session.
-                // But for robust handling, we would ideally capture them programmatically.
-                // However, since we can't programmatically read basic auth headers from
-                // the initial request on the client side, we'll let the browser handle
-                // the initial authentication for the HTML page, and then the fetches
-                // should inherit that, or fail if not, triggering the prompt again.
-
-                // A better, but more complex, solution would be to have a dedicated login form
-                // where you submit credentials, receive a session token, and use that token.
-                // For basic auth, we often rely on the browser's persistence.
-
-                // Let's modify the initial load to be robust:
-                // We will perform a dummy fetch to capture the credentials if the browser
-                // has them, or let the browser prompt.
                 console.log("No stored credentials. Attempting to fetch with browser's default auth.");
                 fetchOverviewData(); // Will trigger auth if not already logged in
                 fetchAndDisplayUsers(); // Will trigger auth if not already logged in
             }
         });
-
-
-        // --- NEW: Intercepting XMLHttpRequest (if you were using it) ---
-        // If you're only using `fetch`, the above `window.fetch` override is enough.
-        // If you have older code using XMLHttpRequest, you'd need a similar override:
-        /*
-        const originalOpen = XMLHttpRequest.prototype.open;
-        XMLHttpRequest.prototype.open = function(method, url, async, user, password) {
-            this._url = url; // Store URL for later
-            if (user && password) { // If credentials are explicitly passed
-                this._authSet = true;
-                this.setRequestHeader('Authorization', `Basic ${btoa(`${user}:${password}`)}`);
-            } else { // Use stored global credentials if not explicitly passed
-                const authHeaders = getAuthHeaders();
-                if (authHeaders['Authorization']) {
-                    this.setRequestHeader('Authorization', authHeaders['Authorization']);
-                }
-            }
-            originalOpen.apply(this, arguments);
-        };
-        */
-        // Note: For basic auth, browsers usually handle this automatically for XMLHttpRequest too,
-        // but explicit setting is safer if you store them.
 
     </script>
 </body>
