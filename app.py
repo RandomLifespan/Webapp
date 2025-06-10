@@ -10,7 +10,7 @@ import secrets
 import urllib.parse
 import json
 
-app = Flask(__app__)
+app = Flask(__name__)
 
 # Configuration
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', secrets.token_hex(32))
