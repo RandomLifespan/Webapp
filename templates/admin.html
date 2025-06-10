@@ -7,14 +7,6 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <style>
-        body {
-            display: flex;
-            flex-direction: column;
-            min-height: 100vh;
-        }
-        .container.mt-4 {
-            flex-grow: 1;
-        }
         .card-body .display-4 {
             font-size: 2.5rem;
             font-weight: 500;
@@ -23,13 +15,6 @@
             margin-top: 15px;
             border-bottom: 1px solid #eee;
             padding-bottom: 5px;
-        }
-        .footer {
-            width: 100%;
-            padding: 1rem;
-            background-color: #f8f9fa;
-            text-align: center;
-            margin-top: 2rem;
         }
     </style>
 </head>
@@ -46,13 +31,10 @@
                     <li class="nav-item">
                         <a class="nav-link active" aria-current="page" href="/admin">Users</a>
                     </li>
-                </ul>
-                <span class="navbar-text me-3" id="loggedInUser">
-                    Not Logged In
+                    </ul>
+                <span class="navbar-text">
+                    Logged in as Admin
                 </span>
-                <button class="btn btn-outline-light" id="logoutButton">
-                    <i class="fas fa-sign-out-alt"></i> Logout
-                </button>
             </div>
         </div>
     </nav>
@@ -129,7 +111,7 @@
             </table>
         </div>
 
-    </div>
+        </div>
 
     <div class="modal fade" id="userDetailModal" tabindex="-1" aria-labelledby="userDetailModalLabel" aria-hidden="true">
         <div class="modal-dialog modal-lg">
@@ -170,14 +152,8 @@
         </div>
     </div>
 
-    <footer class="footer">
-        <div class="container">
-            <p>&copy; 2025 Admin Panel. All rights reserved.</p>
-        </div>
-    </footer>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/jwt-decode@3.1.2/build/jwt-decode.min.js"></script>
     <script>
         const userTableBody = document.getElementById('userTableBody');
         const userSearchInput = document.getElementById('userSearchInput');
@@ -185,88 +161,60 @@
         const searchButton = document.getElementById('searchButton');
         const userDetailModal = new bootstrap.Modal(document.getElementById('userDetailModal'));
         const deleteUserButton = document.getElementById('deleteUserButton');
-        const logoutButton = document.getElementById('logoutButton');
-        const loggedInUserSpan = document.getElementById('loggedInUser');
 
         let currentUsers = []; // Store the currently displayed users
 
-        // --- AUTHENTICATION RELATED FUNCTIONS ---
+        // --- NEW: Store Basic Auth credentials ---
+        let adminUsername = '';
+        let adminPassword = '';
 
-        // Function to get the JWT token from localStorage (recommended for persistence)
-        function getAuthToken() {
-            return localStorage.getItem('access_token'); // Changed to localStorage and 'access_token'
-        }
-
-        // Function to set the username in the navbar
-        function setLoggedInUserDisplay() {
-            const token = getAuthToken();
-            if (token) {
-                try {
-                    const decodedToken = jwt_decode(token); // Using jwt-decode library
-                    if (decodedToken && decodedToken.sub) { // 'sub' is standard for subject (username/userID)
-                        loggedInUserSpan.textContent = `Logged in as: ${decodedToken.sub}`;
-                    } else {
-                        loggedInUserSpan.textContent = 'Logged in';
-                    }
-                } catch (e) {
-                    console.error("Failed to decode token:", e);
-                    loggedInUserSpan.textContent = 'Logged in (Invalid Token)';
-                    // Optionally, clear invalid token and redirect if it's consistently failing
-                    // localStorage.removeItem('access_token');
-                    // window.location.href = '/login.html';
-                }
-            } else {
-                loggedInUserSpan.textContent = 'Not Logged In';
+        // Function to encode credentials for Basic Auth header
+        function getAuthHeaders() {
+            if (!adminUsername || !adminPassword) {
+                // If credentials are not set, try to get them (e.g., first load)
+                // This will trigger the browser's native popup
+                // For subsequent calls, we expect them to be set.
+                return {};
             }
+            const credentials = btoa(`${adminUsername}:${adminPassword}`);
+            return {
+                'Authorization': `Basic ${credentials}`
+            };
         }
 
-        // Global fetch wrapper to include Authorization header and handle 401s
-        // Replace the existing fetch wrapper with this:
-const originalFetch = window.fetch;
-window.fetch = async function(url, options = {}) {
-    // Skip adding auth header for login route
-    if (url.includes('/login')) {
-        return originalFetch(url, options);
-    }
+        // --- NEW: Intercept fetch requests to add Auth Headers ---
+        // We'll create a wrapper around the native fetch
+        const originalFetch = window.fetch;
+        window.fetch = async function(url, options = {}) {
+            const authHeaders = getAuthHeaders();
+            options.headers = {
+                ...options.headers, // Keep existing headers
+                ...authHeaders      // Add Authorization header
+            };
+            const response = await originalFetch(url, options);
 
-    // Get token from both storage locations
-    const token = localStorage.getItem('access_token') || sessionStorage.getItem('access_token');
-    
-    if (token) {
-        options.headers = {
-            ...options.headers,
-            'Authorization': `Bearer ${token}`
+            // If a 401 is received, it means our stored credentials might be invalid or expired.
+            // This is where you could prompt the user again, or redirect to a login page.
+            if (response.status === 401) {
+                console.error("401 Unauthorized received. Stored credentials might be invalid or expired.");
+                // OPTIONAL: You could add logic here to re-prompt the user or reload the page
+                // to trigger the browser's native Basic Auth prompt again.
+                // For simplicity, we'll let the existing error handling catch it.
+            }
+            return response;
         };
-    }
 
-    const response = await originalFetch(url, options);
 
-    // Handle unauthorized responses
-    if (response.status === 401) {
-        localStorage.removeItem('access_token');
-        sessionStorage.removeItem('access_token');
-        window.location.href = '/login.html';
-        return Promise.reject(new Error('Unauthorized'));
-    }
-
-    return response;
-};
-        // Logout function
-        logoutButton.addEventListener('click', () => {
-    localStorage.removeItem('access_token');
-    sessionStorage.removeItem('access_token');
-    window.location.href = '/login.html';
-});
-
-        // --- DATA FETCHING FUNCTIONS ---
-
+        // Function to fetch and display overview data
         async function fetchOverviewData() {
+            // Set initial loading states
             document.getElementById('totalUsers').textContent = 'Loading...';
             document.getElementById('activeToday').textContent = 'Loading...';
             document.getElementById('topEventType').textContent = 'Loading...';
 
             try {
-                const userCountRes = await fetch('/analytics/users/count');
+                // Fetch user count and active users
+                const userCountRes = await fetch('/analytics/users/count'); // fetch() is now wrapped
                 if (userCountRes.ok) {
                     const userCountData = await userCountRes.json();
                     document.getElementById('totalUsers').textContent = userCountData.total_users || 0;
@@ -278,7 +226,8 @@ window.fetch = async function(url, options = {}) {
                     document.getElementById('activeToday').textContent = `Error (${userCountRes.status})`;
                 }
 
-                const topEventsRes = await fetch('/analytics/events/top');
+                // Fetch top events
+                const topEventsRes = await fetch('/analytics/events/top'); // fetch() is now wrapped
                 if (topEventsRes.ok) {
                     const topEventsData = await topEventsRes.json();
                     document.getElementById('topEventType').textContent = topEventsData.length > 0 ? topEventsData[0].event_type : 'N/A';
@@ -290,21 +239,18 @@ window.fetch = async function(url, options = {}) {
 
             } catch (error) {
                 console.error('Network or unhandled error fetching overview data:', error);
-                // The global fetch wrapper already handles redirection for 401/403,
-                // so we don't need redundant alerts or redirections here for those specific errors.
-                // For other network errors, display a client-side error.
-                if (!error.message.includes('Unauthorized') && !error.message.includes('Forbidden')) {
-                    document.getElementById('totalUsers').textContent = 'Error (Client)';
-                    document.getElementById('activeToday').textContent = 'Error (Client)';
-                    document.getElementById('topEventType').textContent = 'Error (Client)';
-                }
+                document.getElementById('totalUsers').textContent = 'Error (Client)';
+                document.getElementById('activeToday').textContent = 'Error (Client)';
+                document.getElementById('topEventType').textContent = 'Error (Client)';
             }
         }
 
+
+        // Function to fetch and display users based on search/filter
         async function fetchAndDisplayUsers(query = '', sort = 'recent') {
             userTableBody.innerHTML = `<tr><td colspan="8" class="text-center">Loading users...</td></tr>`;
             try {
-                const response = await fetch(`/admin/users?query=${encodeURIComponent(query)}&sort=${sort}`);
+                const response = await fetch(`/admin/users?query=${encodeURIComponent(query)}&sort=${sort}`); // fetch() is now wrapped
                 if (!response.ok) {
                     const errorText = await response.text();
                     throw new Error(`HTTP error! Status: ${response.status}. Details: ${errorText}`);
@@ -314,14 +260,11 @@ window.fetch = async function(url, options = {}) {
                 renderUserTable(users);
             } catch (error) {
                 console.error('Error fetching users:', error);
-                if (!error.message.includes('Unauthorized') && !error.message.includes('Forbidden')) {
-                    userTableBody.innerHTML = `<tr><td colspan="8" class="text-center text-danger">Failed to load users: ${error.message}</td></tr>`;
-                } else {
-                    userTableBody.innerHTML = `<tr><td colspan="8" class="text-center text-warning">Authentication required to view users.</td></tr>`;
-                }
+                userTableBody.innerHTML = `<tr><td colspan="8" class="text-center text-danger">Failed to load users: ${error.message}</td></tr>`;
             }
         }
 
+        // Function to render user table rows
         function renderUserTable(users) {
             userTableBody.innerHTML = '';
             if (users.length === 0) {
@@ -348,9 +291,9 @@ window.fetch = async function(url, options = {}) {
             attachViewDetailsListeners();
         }
 
+        // Function to attach event listeners to "View" buttons
         function attachViewDetailsListeners() {
             document.querySelectorAll('.view-details-btn').forEach(button => {
-                // Ensure event listener is added only once
                 button.removeEventListener('click', handleViewDetailsClick);
                 button.addEventListener('click', handleViewDetailsClick);
             });
@@ -361,15 +304,31 @@ window.fetch = async function(url, options = {}) {
             await fetchUserDetails(userId);
         }
 
+        // Function to fetch and display individual user details
         async function fetchUserDetails(userId) {
             try {
-                const userRes = await fetch(`/admin/user/${userId}`);
+                // Fetch user profile
+                const userRes = await fetch(`/admin/user/${userId}`); // fetch() is now wrapped
+                if (!userRes.ok) {
+                    const errorText = await userRes.text();
+                    throw new Error(`User not found or API error: ${userRes.status}. Details: ${errorText}`);
+                }
                 const userData = await userRes.json();
 
-                const sessionsRes = await fetch(`/admin/user/${userId}/sessions`);
+                // Fetch user sessions
+                const sessionsRes = await fetch(`/admin/user/${userId}/sessions`); // fetch() is now wrapped
+                if (!sessionsRes.ok) {
+                    const errorText = await sessionsRes.text();
+                    throw new Error(`Sessions API error: ${sessionsRes.status}. Details: ${errorText}`);
+                }
                 const sessionsData = await sessionsRes.json();
 
-                const eventsRes = await fetch(`/admin/user/${userId}/events`);
+                // Fetch user events
+                const eventsRes = await fetch(`/admin/user/${userId}/events`); // fetch() is now wrapped
+                if (!eventsRes.ok) {
+                    const errorText = await eventsRes.text();
+                    throw new Error(`Events API error: ${eventsRes.status}. Details: ${errorText}`);
+                }
                 const eventsData = await eventsRes.json();
 
                 // Populate modal
@@ -387,12 +346,13 @@ window.fetch = async function(url, options = {}) {
                 // Populate sessions
                 const noSessionsMessage = document.getElementById('noSessionsMessage');
                 const sessionsList = document.getElementById('detailSessionsList');
-                // Clear all but the placeholder message
+                
                 Array.from(sessionsList.children).forEach(child => {
                     if (child.id !== 'noSessionsMessage') {
                         child.remove();
                     }
                 });
+
                 if (sessionsData.length > 0) {
                     noSessionsMessage.style.display = 'none';
                     sessionsData.forEach(session => {
@@ -414,12 +374,13 @@ window.fetch = async function(url, options = {}) {
                 // Populate events
                 const noEventsMessage = document.getElementById('noEventsMessage');
                 const eventsList = document.getElementById('detailEventsList');
-                // Clear all but the placeholder message
+                
                 Array.from(eventsList.children).forEach(child => {
                     if (child.id !== 'noEventsMessage') {
                         child.remove();
                     }
                 });
+
                 if (eventsData.length > 0) {
                     noEventsMessage.style.display = 'none';
                     eventsData.forEach(event => {
@@ -466,7 +427,7 @@ window.fetch = async function(url, options = {}) {
                 try {
                     const response = await fetch(`/admin/user/${userIdToDelete}`, {
                         method: 'DELETE'
-                    });
+                    }); // fetch() is now wrapped
                     if (!response.ok) {
                         const errorText = await response.text();
                         throw new Error(`HTTP error! status: ${response.status}. Details: ${errorText}`);
@@ -491,18 +452,72 @@ window.fetch = async function(url, options = {}) {
 
         // Initial load
         document.addEventListener('DOMContentLoaded', () => {
-    const token = localStorage.getItem('access_token') || sessionStorage.getItem('access_token');
-    
-    if (!token) {
-        window.location.href = '/login.html';
-        return;
-    }
-    
-    // Set up the rest of your page
-    setLoggedInUserDisplay();
-    fetchOverviewData();
-    fetchAndDisplayUsers();
-});
+            // Check if credentials are in sessionStorage (from a previous successful login)
+            const storedUsername = sessionStorage.getItem('adminUsername');
+            const storedPassword = sessionStorage.getItem('adminPassword');
+
+            if (storedUsername && storedPassword) {
+                adminUsername = storedUsername;
+                adminPassword = storedPassword;
+                console.log("Credentials retrieved from sessionStorage.");
+                fetchOverviewData();
+                fetchAndDisplayUsers();
+            } else {
+                // If no stored credentials, the first fetch will trigger the browser's native prompt
+                // After the user enters credentials, we need to capture them.
+                // This is the tricky part with native Basic Auth.
+                // A common pattern is to just let the browser handle it for the initial load,
+                // and then if a sub-request fails, you might need to re-prompt or handle it
+                // as an expired session.
+                // For this scenario, we'll assume the initial page load (admin.html)
+                // has been authenticated, and the browser will prompt for the first time.
+                // We'll then rely on the *browser's behavior* to send the Authorization header
+                // for the initial admin.html request.
+                // When you make subsequent AJAX calls, the `window.fetch` override will inject them.
+
+                // If the user *just* loaded the page and entered credentials,
+                // the browser *should* send them with subsequent fetches within that session.
+                // But for robust handling, we would ideally capture them programmatically.
+                // However, since we can't programmatically read basic auth headers from
+                // the initial request on the client side, we'll let the browser handle
+                // the initial authentication for the HTML page, and then the fetches
+                // should inherit that, or fail if not, triggering the prompt again.
+
+                // A better, but more complex, solution would be to have a dedicated login form
+                // where you submit credentials, receive a session token, and use that token.
+                // For basic auth, we often rely on the browser's persistence.
+
+                // Let's modify the initial load to be robust:
+                // We will perform a dummy fetch to capture the credentials if the browser
+                // has them, or let the browser prompt.
+                console.log("No stored credentials. Attempting to fetch with browser's default auth.");
+                fetchOverviewData(); // Will trigger auth if not already logged in
+                fetchAndDisplayUsers(); // Will trigger auth if not already logged in
+            }
+        });
+
+
+        // --- NEW: Intercepting XMLHttpRequest (if you were using it) ---
+        // If you're only using `fetch`, the above `window.fetch` override is enough.
+        // If you have older code using XMLHttpRequest, you'd need a similar override:
+        /*
+        const originalOpen = XMLHttpRequest.prototype.open;
+        XMLHttpRequest.prototype.open = function(method, url, async, user, password) {
+            this._url = url; // Store URL for later
+            if (user && password) { // If credentials are explicitly passed
+                this._authSet = true;
+                this.setRequestHeader('Authorization', `Basic ${btoa(`${user}:${password}`)}`);
+            } else { // Use stored global credentials if not explicitly passed
+                const authHeaders = getAuthHeaders();
+                if (authHeaders['Authorization']) {
+                    this.setRequestHeader('Authorization', authHeaders['Authorization']);
+                }
+            }
+            originalOpen.apply(this, arguments);
+        };
+        */
+        // Note: For basic auth, browsers usually handle this automatically for XMLHttpRequest too,
+        // but explicit setting is safer if you store them.
 
     </script>
 </body>
