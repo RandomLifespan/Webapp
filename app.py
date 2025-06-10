@@ -25,12 +25,10 @@ app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(hours=1) # Token valid for 1 
 jwt = JWTManager(app)
 # --- End JWT Configuration ---
 
-CORS(app, resources={r"/https://web-production-022e9.up.railway.app": {"origins": "*"}}, 
-     supports_credentials=True, 
-     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"], # Explicitly allow OPTIONS for preflight
-     headers=["Content-Type", "Authorization"]) # CRITICAL: Allow the Authorization header
-
-
+CORS(app, resources={r"/*": {"origins": "https://my-frontend-app.com"}},
+     supports_credentials=True,
+     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+     headers=["Content-Type", "Authorization"])
 # --- End CORS Configuration ---
 # --- JWT Error Handlers (important for clean 401s for admin panel) ---
 @jwt.unauthorized_loader
