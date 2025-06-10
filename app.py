@@ -570,7 +570,20 @@ def admin_users():
         cur.execute(sql_query, params)
         users = cur.fetchall()
 
-        return jsonify([dict(user) for user in users])
+        # --- MODIFICATION START ---
+        # Convert datetime objects to ISO 8601 strings
+        serialized_users = []
+        for user in users:
+            user_dict = dict(user) # Convert RealDictRow to dict
+            if user_dict.get('created_at'):
+                user_dict['created_at'] = user_dict['created_at'].isoformat()
+            if user_dict.get('last_seen'):
+                user_dict['last_seen'] = user_dict['last_seen'].isoformat()
+            serialized_users.append(user_dict)
+
+        return jsonify(serialized_users)
+        # --- MODIFICATION END ---
+
     except Exception as e:
         print(f"Error fetching admin users: {e}")
         return jsonify({'error': 'Failed to retrieve user data: ' + str(e)}), 500
