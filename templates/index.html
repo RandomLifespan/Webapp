@@ -6,97 +6,205 @@
     <title>My Telegram Mini App</title>
     <style>
         body {
-            font-family: sans-serif;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             display: flex;
             flex-direction: column;
             justify-content: center;
             align-items: center;
             min-height: 100vh;
             margin: 0;
-            background-color: #f0f0f0;
+            background-color: #f0f2f5;
             color: #333;
             text-align: center;
+            padding: 15px; /* Add some padding for smaller screens */
+            box-sizing: border-box; /* Include padding in element's total width and height */
         }
         .container {
             background-color: #fff;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-            max-width: 400px;
-            width: 90%;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 6px 20px rgba(0,0,0,0.1);
+            max-width: 450px;
+            width: 100%;
+            margin-top: 20px;
+            margin-bottom: 20px;
         }
         h1 {
-            color: #007bff;
+            color: #1a73e8; /* A more vibrant blue */
+            margin-bottom: 25px;
+            font-size: 1.8em;
+        }
+        .tab-container {
+            display: flex;
             margin-bottom: 20px;
+            border-bottom: 2px solid #e0e0e0;
+        }
+        .tab-button {
+            flex-grow: 1;
+            padding: 12px 0;
+            cursor: pointer;
+            font-size: 1.1em;
+            font-weight: 600;
+            color: #5f6368;
+            background-color: transparent;
+            border: none;
+            border-bottom: 3px solid transparent;
+            transition: all 0.3s ease;
+        }
+        .tab-button:hover:not(.active) {
+            color: #1a73e8;
+        }
+        .tab-button.active {
+            color: #1a73e8;
+            border-bottom-color: #1a73e8;
+        }
+        .tab-content {
+            display: none;
+            padding-top: 15px;
+        }
+        .tab-content.active {
+            display: block;
         }
         p {
             margin-bottom: 10px;
+            line-height: 1.5;
+        }
+        .info-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+            font-size: 0.95em;
+        }
+        .info-item:last-child {
+            border-bottom: none;
+        }
+        .info-label {
+            font-weight: bold;
+            color: #555;
+            text-align: left;
+            flex-basis: 40%;
+        }
+        .info-value {
+            color: #333;
+            text-align: right;
+            flex-basis: 60%;
+            word-break: break-all; /* Ensures long IDs/usernames don't overflow */
         }
         #statusMessage {
-            margin-top: 20px;
+            margin-top: 25px;
+            padding: 10px;
+            border-radius: 5px;
             font-weight: bold;
+            display: none; /* Hidden by default, shown when messages appear */
         }
         .loading {
             color: #6c757d;
+            background-color: #e2e6ea;
         }
         .success {
-            color: #28a745;
+            color: #155724;
+            background-color: #d4edda;
         }
         .error {
-            color: #dc3545;
+            color: #721c24;
+            background-color: #f8d7da;
         }
         .points-display {
-            font-size: 1.2em;
-            margin: 20px 0;
-            padding: 10px;
-            border: 1px solid #ccc;
-            border-radius: 5px;
-            background-color: #e9ecef;
+            font-size: 1.6em; /* Slightly larger for emphasis */
+            margin: 25px 0;
+            padding: 15px;
+            border: 1px solid #cce5ff;
+            border-radius: 8px;
+            background-color: #eaf6ff;
+            color: #0056b3;
+            font-weight: bold;
         }
         button {
-            padding: 10px 20px;
-            font-size: 1em;
+            padding: 12px 25px;
+            font-size: 1.1em;
             color: #fff;
-            background-color: #007bff;
+            background-color: #1a73e8;
             border: none;
-            border-radius: 5px;
+            border-radius: 8px;
             cursor: pointer;
-            transition: background-color 0.3s ease;
+            transition: background-color 0.3s ease, transform 0.1s ease;
+            width: 100%; /* Full width button */
+            box-sizing: border-box;
         }
         button:hover:not(:disabled) {
             background-color: #0056b3;
+            transform: translateY(-1px);
         }
         button:disabled {
-            background-color: #cccccc;
+            background-color: #a0c3f0; /* Lighter disabled color */
             cursor: not-allowed;
         }
         #cooldown-timer {
-            margin-top: 10px;
+            margin-top: 15px;
             font-weight: bold;
-            color: #ff5722;
+            color: #e65100; /* A warm orange for cooldown */
+            font-size: 1em;
+        }
+
+        /* Basic responsiveness for smaller screens */
+        @media (max-width: 600px) {
+            .container {
+                padding: 15px;
+                margin: 10px;
+            }
+            h1 {
+                font-size: 1.5em;
+                margin-bottom: 20px;
+            }
+            .tab-button {
+                font-size: 1em;
+                padding: 10px 0;
+            }
+            .points-display {
+                font-size: 1.4em;
+                padding: 10px;
+            }
+            button {
+                font-size: 1em;
+                padding: 10px 20px;
+            }
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Welcome to Your Mini App!</h1>
-        <p>Connecting to backend...</p>
-        <div id="user-info">
-            <p><strong>Telegram User ID:</strong> <span id="userId">Loading...</span></p>
-            <p><strong>First Name:</strong> <span id="firstName">Loading...</span></p>
-            <p><strong>Username:</strong> <span id="username">Loading...</span></p>
+        <h1>My Mini App</h1>
+
+        <div class="tab-container">
+            <button class="tab-button active" data-tab="points">Points</button>
+            <button class="tab-button" data-tab="profile">Profile</button>
         </div>
 
-        <hr>
-
-        <div class="points-section">
-            <h2>Your Points</h2>
+        <div id="pointsTab" class="tab-content active">
             <p class="points-display">Current Points: <span id="currentPoints">0</span></p>
             <button id="generatePointsButton">Generate Points</button>
             <p id="cooldown-timer"></p>
         </div>
 
-        <p id="statusMessage" class="loading">Sending user data...</p>
+        <div id="profileTab" class="tab-content">
+            <div id="user-info">
+                <div class="info-item">
+                    <span class="info-label">Telegram User ID:</span>
+                    <span class="info-value" id="userId">Loading...</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">First Name:</span>
+                    <span class="info-value" id="firstName">Loading...</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Username:</span>
+                    <span class="info-value" id="username">Loading...</span>
+                </div>
+            </div>
+        </div>
+
+        <p id="statusMessage"></p>
     </div>
 
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
@@ -109,10 +217,39 @@
         const generatePointsButton = document.getElementById('generatePointsButton');
         const cooldownTimerDisplay = document.getElementById('cooldown-timer');
 
+        const tabButtons = document.querySelectorAll('.tab-button');
+        const tabContents = document.querySelectorAll('.tab-content');
+
         let cooldownEndDate = null;
         const COOLDOWN_MINUTES = 5;
 
-        // Function to update the cooldown timer display
+        // --- Tab Switching Logic ---
+        tabButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                const targetTab = button.dataset.tab;
+
+                tabButtons.forEach(btn => btn.classList.remove('active'));
+                tabContents.forEach(content => content.classList.remove('active'));
+
+                button.classList.add('active');
+                document.getElementById(`${targetTab}Tab`).classList.add('active');
+            });
+        });
+
+        // --- Status Message Utility ---
+        function showStatusMessage(message, type) {
+            statusMessage.textContent = message;
+            statusMessage.className = type; // Apply class for styling (loading, success, error)
+            statusMessage.style.display = 'block'; // Make sure it's visible
+            // Optionally hide after a few seconds if it's a success/error message
+            if (type === 'success' || type === 'error') {
+                setTimeout(() => {
+                    statusMessage.style.display = 'none';
+                }, 5000); // Hide after 5 seconds
+            }
+        }
+
+        // --- Cooldown Timer Function ---
         function updateCooldownTimer() {
             if (!cooldownEndDate) {
                 cooldownTimerDisplay.textContent = '';
@@ -136,7 +273,7 @@
             }
         }
 
-        // Function to fetch user points
+        // --- Fetch User Points Function ---
         async function fetchUserPoints() {
             try {
                 const initData = Telegram.WebApp.initData;
@@ -161,18 +298,19 @@
                 } else {
                     console.error('Failed to fetch points:', data.message);
                     currentPointsSpan.textContent = 'Error';
+                    showStatusMessage(`Failed to load points: ${data.message}`, 'error');
                 }
             } catch (error) {
                 console.error('Error fetching user points:', error);
                 currentPointsSpan.textContent = 'Error';
+                showStatusMessage(`Error loading points: ${error.message}`, 'error');
             }
         }
 
-        // Function to handle points generation
+        // --- Handle Points Generation Function ---
         async function handleGeneratePoints() {
             generatePointsButton.disabled = true; // Disable button immediately
-            statusMessage.textContent = 'Generating points...';
-            statusMessage.className = 'loading';
+            showStatusMessage('Generating points...', 'loading');
 
             try {
                 const initData = Telegram.WebApp.initData;
@@ -191,47 +329,44 @@
 
                 const data = await response.json();
                 if (data.status === 'success') {
-                    statusMessage.textContent = data.message;
-                    statusMessage.className = 'success';
+                    showStatusMessage(data.message, 'success');
                     currentPointsSpan.textContent = data.new_total_points;
-                    // Set new cooldown end time
                     cooldownEndDate = new Date(Date.now() + COOLDOWN_MINUTES * 60 * 1000);
-                    updateCooldownTimer(); // Start the timer
+                    updateCooldownTimer();
                 } else if (data.status === 'cooldown') {
-                    statusMessage.textContent = data.message;
-                    statusMessage.className = 'error';
-                    // Re-calculate cooldown end time from the server response
+                    showStatusMessage(data.message, 'error');
                     cooldownEndDate = new Date(Date.now() + data.cooldown_seconds_left * 1000);
-                    updateCooldownTimer(); // Start the timer
+                    updateCooldownTimer();
                 } else {
-                    statusMessage.textContent = `Error: ${data.message || 'Unknown error from backend'}`;
-                    statusMessage.className = 'error';
-                    generatePointsButton.disabled = false; // Re-enable on unknown error
+                    showStatusMessage(`Error: ${data.message || 'Unknown error from backend'}`, 'error');
+                    generatePointsButton.disabled = false;
                 }
             } catch (error) {
-                statusMessage.textContent = `Client-side error: ${error.message}`;
-                statusMessage.className = 'error';
+                showStatusMessage(`Client-side error: ${error.message}`, 'error');
                 console.error('Fetch error:', error);
-                generatePointsButton.disabled = false; // Re-enable on error
+                generatePointsButton.disabled = false;
             }
         }
 
-        // Event listener for the button
+        // --- Event Listener for Points Button ---
         generatePointsButton.addEventListener('click', handleGeneratePoints);
 
-
-        // Initial setup
+        // --- Initial Setup and Telegram Web App Integration ---
         if (Telegram && Telegram.WebApp) {
             Telegram.WebApp.ready();
             Telegram.WebApp.expand(); // Optional: expand the mini app to full screen
+            Telegram.WebApp.setHeaderColor('secondary_bg_color'); // Set header color to match app theme
 
             const initData = Telegram.WebApp.initData;
             const user = Telegram.WebApp.initDataUnsafe.user;
 
             if (user && initData) {
+                // Populate user info fields immediately if available
                 userIdSpan.textContent = user.id || 'N/A';
                 firstNameSpan.textContent = user.first_name || 'N/A';
                 usernameSpan.textContent = user.username || 'N/A';
+
+                showStatusMessage('Initializing app...', 'loading'); // Indicate initial loading state
 
                 fetch('/get_user_info', {
                     method: 'POST',
@@ -255,31 +390,26 @@
                 })
                 .then(data => {
                     if (data.status === 'success') {
-                        statusMessage.textContent = 'User data sent and processed successfully!';
-                        statusMessage.className = 'success';
-                        console.log('Backend response:', data);
+                        showStatusMessage('App initialized successfully!', 'success');
+                        console.log('Backend response (user info):', data);
                         fetchUserPoints(); // Fetch points after user info is processed
                     } else {
-                        statusMessage.textContent = `Error: ${data.error || 'Unknown error from backend'}`;
-                        statusMessage.className = 'error';
+                        showStatusMessage(`Error initializing: ${data.error || 'Unknown error from backend'}`, 'error');
                         console.error('Backend reported error:', data);
                     }
                 })
                 .catch(error => {
-                    statusMessage.textContent = `Client-side error: ${error.message}`;
-                    statusMessage.className = 'error';
-                    console.error('Fetch error:', error);
+                    showStatusMessage(`Initialization error: ${error.message}`, 'error');
+                    console.error('Fetch error during initialization:', error);
                 });
 
             } else {
-                statusMessage.textContent = 'Error: Telegram user data or initData not available.';
-                statusMessage.className = 'error';
+                showStatusMessage('Error: Telegram user data or initData not available.', 'error');
                 console.error('Telegram.WebApp.initDataUnsafe.user or initData is missing.');
             }
 
         } else {
-            statusMessage.textContent = 'Telegram Web App environment not detected. Please open this page within Telegram.';
-            statusMessage.className = 'error';
+            showStatusMessage('Telegram Web App environment not detected. Please open this page within Telegram.', 'error');
             console.error('Telegram.WebApp object not found. This page is not running in a Telegram Mini App context.');
         }
     </script>
