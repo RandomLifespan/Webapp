@@ -75,13 +75,22 @@ def init_db():
             FOREIGN KEY (user_id) REFERENCES users (user_id) ON DELETE CASCADE
         );
         ''')
+
+        # NEW TABLE FOR POINTS
+        cur.execute('''
+        CREATE TABLE IF NOT EXISTS user_points (
+            user_id BIGINT PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE,
+            points INTEGER DEFAULT 0,
+            last_generated_at TIMESTAMP WITHOUT TIME ZONE
+        );
+        ''')
+
         conn.commit()
         print("PostgreSQL tables checked/created successfully.")
     except Exception as e:
         print(f"Error initializing PostgreSQL database: {e}")
         if conn:
             conn.rollback()
-        # Re-raise the exception to indicate a critical startup failure
         raise
     finally:
         if conn:
@@ -202,7 +211,147 @@ def check_telegram_authentication():
 @app.route('/')
 def index():
     return render_template('index.html')
+    
+@app.route('/generate_points', methods=['POST'])
+def generate_points():
+    if not hasattr(g, 'telegram_user') or not g.telegram_user:
+        return jsonify({'error': 'Unauthorized: Telegram user data not found.'}), 401
 
+    user_id = g.telegram_user['id']
+    now = datetime.now()
+    cooldown_duration = timedelta(minutes=5) # 5 minutes cooldown
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # Fetch current points and last generated time
+        cur.execute("SELECT points, last_generated_at FROM user_points WHERE user_id = %s", (user_id,))
+        user_points_data = cur.fetchone()
+
+        current_points = 0
+        last_generated_at = None
+
+        if user_points_data:
+            current_points = user_points_data[0]
+            last_generated_at = user_points_data[1]
+
+        # Check for cooldown
+        if last_generated_at and (now - last_generated_at) < cooldown_duration:
+            time_left = (cooldown_duration - (now - last_generated_at)).total_seconds()
+            return jsonify({
+                'status': 'cooldown',
+                'message': f'You need to wait {int(time_left // 60)} minutes and {int(time_left % 60)} seconds before generating points again.',
+                'cooldown_seconds_left': int(time_left)
+            }), 429 # Too Many Requests
+
+        # Generate points (e.g., add 10 points)
+        points_to_add = 10
+        new_points = current_points + points_to_add
+
+        # Update or insert user points and last generated timestamp
+        cur.execute('''
+            INSERT INTO user_points (user_id, points, last_generated_at)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (user_id) DO UPDATE SET
+                points = EXCLUDED.points,
+                last_generated_at = EXCLUDED.last_generated_at
+        ''', (user_id, new_points, now))
+
+        # Log the event
+        cur.execute('''
+            INSERT INTO user_events (user_id, event_type, event_data, created_at)
+            VALUES (%s, %s, %s, %s)
+        ''', (user_id, 'points_generated', json.dumps({'points_added': points_to_add, 'new_total': new_points}), now))
+
+        conn.commit()
+
+        return jsonify({
+            'status': 'success',
+            'message': f'Successfully generated {points_to_add} points!',
+            'new_total_points': new_points
+        })
+
+    except Exception as e:
+        print(f"Error generating points for user {user_id}: {e}")
+        if conn:
+            conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if conn:
+            conn.close()
+
+@app.route('/generate_points', methods=['POST'])
+def generate_points():
+    if not hasattr(g, 'telegram_user') or not g.telegram_user:
+        return jsonify({'error': 'Unauthorized: Telegram user data not found.'}), 401
+
+    user_id = g.telegram_user['id']
+    now = datetime.now()
+    cooldown_duration = timedelta(minutes=5) # 5 minutes cooldown
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # Fetch current points and last generated time
+        cur.execute("SELECT points, last_generated_at FROM user_points WHERE user_id = %s", (user_id,))
+        user_points_data = cur.fetchone()
+
+        current_points = 0
+        last_generated_at = None
+
+        if user_points_data:
+            current_points = user_points_data[0]
+            last_generated_at = user_points_data[1]
+
+        # Check for cooldown
+        if last_generated_at and (now - last_generated_at) < cooldown_duration:
+            time_left = (cooldown_duration - (now - last_generated_at)).total_seconds()
+            return jsonify({
+                'status': 'cooldown',
+                'message': f'You need to wait {int(time_left // 60)} minutes and {int(time_left % 60)} seconds before generating points again.',
+                'cooldown_seconds_left': int(time_left)
+            }), 429 # Too Many Requests
+
+        # Generate points (e.g., add 10 points)
+        points_to_add = 10
+        new_points = current_points + points_to_add
+
+        # Update or insert user points and last generated timestamp
+        cur.execute('''
+            INSERT INTO user_points (user_id, points, last_generated_at)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (user_id) DO UPDATE SET
+                points = EXCLUDED.points,
+                last_generated_at = EXCLUDED.last_generated_at
+        ''', (user_id, new_points, now))
+
+        # Log the event
+        cur.execute('''
+            INSERT INTO user_events (user_id, event_type, event_data, created_at)
+            VALUES (%s, %s, %s, %s)
+        ''', (user_id, 'points_generated', json.dumps({'points_added': points_to_add, 'new_total': new_points}), now))
+
+        conn.commit()
+
+        return jsonify({
+            'status': 'success',
+            'message': f'Successfully generated {points_to_add} points!',
+            'new_total_points': new_points
+        })
+
+    except Exception as e:
+        print(f"Error generating points for user {user_id}: {e}")
+        if conn:
+            conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if conn:
+            conn.close()
+            
 @app.route('/get_user_info', methods=['POST'])
 def get_user_info():
     # We expect g.telegram_user to be set by the before_request middleware
