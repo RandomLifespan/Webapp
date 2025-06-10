@@ -192,8 +192,9 @@ def check_telegram_authentication():
 
     exempt_prefixes = ['/admin', '/analytics', '/static'] # Added logout
     if request.path == '/login.html':
-        print(f"Redirecting direct access to {request.path} to /admin/login")
         return redirect(url_for('admin_login'))
+    if request.path == '/' or request.path == '/favicon.ico':
+        return None
     for prefix in exempt_prefixes:
         if request.path.startswith(prefix):
             return None # Allow the request to proceed to the next handler/route
