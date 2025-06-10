@@ -28,7 +28,6 @@ def get_db_connection():
         return conn
     except Exception as e:
         print(f"Error connecting to PostgreSQL database: {e}")
-        # Re-raise to ensure the error propagates and is caught by the route's try-except
         raise
 
 def init_db():
@@ -172,7 +171,7 @@ def require_admin_auth(f):
     def decorated(*args, **kwargs):
         auth = request.authorization
         if not auth or not check_admin_credentials(auth.username, auth.password):
-            print(f"Admin auth failed for {request.path}") # Debug print
+            print(f"Admin auth failed for {request.path}")
             return 'Could not verify your access level for that URL.\n' \
                    'You have to login with proper credentials', 401, \
                    {'WWW-Authenticate': 'Basic realm="Login Required"'}
@@ -282,71 +281,34 @@ def generate_points():
         if conn:
             conn.close()
 
-@app.route('/generate_points', methods=['POST'])
-def generate_points():
+@app.route('/get_user_points', methods=['GET'])
+def get_user_points():
     if not hasattr(g, 'telegram_user') or not g.telegram_user:
         return jsonify({'error': 'Unauthorized: Telegram user data not found.'}), 401
 
     user_id = g.telegram_user['id']
-    now = datetime.now()
-    cooldown_duration = timedelta(minutes=5) # 5 minutes cooldown
-
     conn = None
     try:
         conn = get_db_connection()
-        cur = conn.cursor()
-
-        # Fetch current points and last generated time
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute("SELECT points, last_generated_at FROM user_points WHERE user_id = %s", (user_id,))
         user_points_data = cur.fetchone()
 
-        current_points = 0
-        last_generated_at = None
-
         if user_points_data:
-            current_points = user_points_data[0]
-            last_generated_at = user_points_data[1]
-
-        # Check for cooldown
-        if last_generated_at and (now - last_generated_at) < cooldown_duration:
-            time_left = (cooldown_duration - (now - last_generated_at)).total_seconds()
             return jsonify({
-                'status': 'cooldown',
-                'message': f'You need to wait {int(time_left // 60)} minutes and {int(time_left % 60)} seconds before generating points again.',
-                'cooldown_seconds_left': int(time_left)
-            }), 429 # Too Many Requests
-
-        # Generate points (e.g., add 10 points)
-        points_to_add = 10
-        new_points = current_points + points_to_add
-
-        # Update or insert user points and last generated timestamp
-        cur.execute('''
-            INSERT INTO user_points (user_id, points, last_generated_at)
-            VALUES (%s, %s, %s)
-            ON CONFLICT (user_id) DO UPDATE SET
-                points = EXCLUDED.points,
-                last_generated_at = EXCLUDED.last_generated_at
-        ''', (user_id, new_points, now))
-
-        # Log the event
-        cur.execute('''
-            INSERT INTO user_events (user_id, event_type, event_data, created_at)
-            VALUES (%s, %s, %s, %s)
-        ''', (user_id, 'points_generated', json.dumps({'points_added': points_to_add, 'new_total': new_points}), now))
-
-        conn.commit()
-
-        return jsonify({
-            'status': 'success',
-            'message': f'Successfully generated {points_to_add} points!',
-            'new_total_points': new_points
-        })
-
+                'status': 'success',
+                'points': user_points_data['points'],
+                'last_generated_at': user_points_data['last_generated_at'].isoformat() if user_points_data['last_generated_at'] else None
+            })
+        else:
+            return jsonify({
+                'status': 'success',
+                'points': 0,
+                'last_generated_at': None,
+                'message': 'No points found for this user.'
+            })
     except Exception as e:
-        print(f"Error generating points for user {user_id}: {e}")
-        if conn:
-            conn.rollback()
+        print(f"Error fetching points for user {user_id}: {e}")
         return jsonify({'error': str(e)}), 500
     finally:
         if conn:
@@ -630,10 +592,10 @@ def delete_user_data(user_id):
         conn = get_db_connection()
         cur = conn.cursor()
         
-        # Deleting from user_events and user_sessions first due to foreign key constraints
-        # (Though with ON DELETE CASCADE, deleting from users would cascade, explicit is fine)
+        # Deleting from user_events, user_sessions, and user_points first due to foreign key constraints
         cur.execute('DELETE FROM user_events WHERE user_id = %s', (user_id,))
         cur.execute('DELETE FROM user_sessions WHERE user_id = %s', (user_id,))
+        cur.execute('DELETE FROM user_points WHERE user_id = %s', (user_id,)) # Added this line
         cur.execute('DELETE FROM users WHERE user_id = %s', (user_id,))
         conn.commit()
         
