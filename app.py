@@ -220,7 +220,8 @@ def require_admin_auth(f):
 def check_telegram_authentication():
     # Define a list of URL path prefixes that should be exempt from Telegram authentication.
     # Now includes /admin_login and /login.html
-    exempt_prefixes = ['/admin', '/analytics', '/static', '/login', '/login.html']
+    exempt_prefixes = ['/admin', '/analytics', '/static', '/lo
+    gin', '/login.html']
     
     # Explicitly exempt the root path '/' and favicon.ico
     if request.path == '/' or request.path == '/favicon.ico':
