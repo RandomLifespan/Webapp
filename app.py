@@ -9,6 +9,7 @@ import hmac
 import secrets
 import urllib.parse
 import json
+from flask_wtf.csrf import CSRFProtect, generate_csrf # Import CSRFProtect and generate_csrf
 
 app = Flask(__name__)
 
@@ -17,6 +18,10 @@ app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 app.config['TELEGRAM_BOT_TOKEN'] = os.environ.get('TELEGRAM_BOT_TOKEN', '')
 app.config['SESSION_COOKIE_NAME'] = 'admin_session' # Name for the session cookie
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7) # Optional: Session lifetime
+
+# Enable CSRF protection for forms. This makes csrf_token() available in templates.
+app.config['WTF_CSRF_ENABLED'] = True # Explicitly enable CSRF
+csrf = CSRFProtect(app) # Initialize CSRFProtect
 
 # --- PostgreSQL Database Connection ---
 def get_db_connection():
@@ -165,7 +170,7 @@ def validate_telegram_data(init_data_raw):
 # --- Admin protection middleware ---
 def check_admin_credentials(username, password):
     correct_username = os.environ.get('ADMIN_USERNAME', 'admin')
-    correct_password = os.environ.get('ADMIN_PASSWORD', 'securepassword')
+    correct_password = os.environ.get('ADMIN_PASSWORD', 'securepassword') # WARNING: Use proper hashing in production!
     return username == correct_username and password == correct_password
 
 # Modified require_admin_auth to use session
@@ -186,7 +191,7 @@ def require_admin_auth(f):
 def check_telegram_authentication():
     # Define a list of URL path prefixes that should be exempt from Telegram authentication.
     # Now include /admin/login explicitly
-    exempt_prefixes = ['/admin/login', '/admin', '/analytics', '/static']
+    exempt_prefixes = ['/admin/login', '/admin', '/analytics', '/static', '/admin/logout'] # Added logout
 
     # Explicitly exempt the root path '/' and favicon.ico
     if request.path == '/' or request.path == '/favicon.ico':
@@ -225,12 +230,8 @@ def admin_login():
 
         if check_admin_credentials(username, password):
             session['admin_logged_in'] = True
-            # Store credentials in session for future use by fetch wrapper in admin.html
-            # Note: Storing password directly in session is generally not recommended for
-            # production, but for simplicity with basic auth proxy, it's used here.
-            # For higher security, you'd use a token or similar.
-            session['admin_username'] = username
-            session['admin_password'] = password
+            session.permanent = True # Make the session permanent if you set PERMANENT_SESSION_LIFETIME
+            session['admin_username'] = username # Store username in session for display
             return jsonify({'message': 'Login successful'}), 200
         else:
             return jsonify({'error': 'Invalid credentials'}), 401
@@ -238,15 +239,20 @@ def admin_login():
         # If already logged in, redirect to admin dashboard
         if 'admin_logged_in' in session and session['admin_logged_in']:
             return redirect(url_for('admin_panel'))
+        # Flask-WTF will automatically provide csrf_token() to the template
         return render_template('login.html')
 
 # NEW: Admin Logout Route
 @app.route('/admin/logout')
 def admin_logout():
     session.pop('admin_logged_in', None)
-    session.pop('admin_username', None)
-    session.pop('admin_password', None)
-    return redirect(url_for('admin_login'))
+    session.pop('admin_username', None) # Remove username from session
+    # Also remove session cookie
+    response = redirect(url_for('admin_login'))
+    # This might not be strictly necessary as session.pop clears data,
+    # but some setups might benefit from explicitly deleting the cookie.
+    # response.delete_cookie(app.config['SESSION_COOKIE_NAME'])
+    return response
 
 
 @app.route('/generate_points', methods=['POST'])
@@ -451,6 +457,8 @@ def get_user_info():
 @app.route('/admin') # <--- This is the URL that will display admin.html
 @require_admin_auth
 def admin_panel():
+    # You might want to pass the admin username to the template here if you wish to display it
+    # return render_template('admin.html', admin_username=session.get('admin_username', 'Admin'))
     return render_template('admin.html')
 
 # --- Analytics Endpoints ---
