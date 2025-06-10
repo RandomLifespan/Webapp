@@ -10,11 +10,40 @@ import secrets
 import urllib.parse
 import json
 
+# --- JWT Specific Imports ---
+from flask_jwt_extended import create_access_token, jwt_required, JWTManager, get_jwt_identity, exceptions as jwt_exceptions
+# --- End JWT Specific Imports ---
+
 app = Flask(__name__)
 
 # Configuration
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', secrets.token_hex(32))
+app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', secrets.token_hex(32)) # Renamed to avoid confusion with JWT_SECRET_KEY
 app.config['TELEGRAM_BOT_TOKEN'] = os.environ.get('TELEGRAM_BOT_TOKEN', '')
+
+# --- JWT Configuration ---
+app.config["JWT_SECRET_KEY"] = os.environ.get('JWT_SECRET_KEY', secrets.token_hex(32)) # Set a strong, unique key
+app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(hours=1) # Token valid for 1 hour
+jwt = JWTManager(app)
+# --- End JWT Configuration ---
+
+# --- JWT Error Handlers (important for clean 401s for admin panel) ---
+@jwt.unauthorized_loader
+def unauthorized_response(callback):
+    return jsonify({"msg": "Missing Authorization Header or Token"}), 401
+
+@jwt.invalid_token_loader
+def invalid_token_response(callback):
+    return jsonify({"msg": "Signature verification failed"}), 401
+
+@jwt.expired_token_loader
+def expired_token_response(callback):
+    return jsonify({"msg": "Token has expired"}), 401
+
+@jwt.revoked_token_loader
+def revoked_token_response(callback):
+    return jsonify({"msg": "Token has been revoked"}), 401
+# --- End JWT Error Handlers ---
+
 
 # --- PostgreSQL Database Connection ---
 def get_db_connection():
@@ -96,10 +125,11 @@ def init_db():
             conn.close()
 
 # Call init_db during application startup
-init_db()
+with app.app_context(): # Run init_db within app context
+    init_db()
 
 
-# --- Security helper functions ---
+# --- Security helper functions for Telegram ---
 def validate_telegram_data(init_data_raw):
     if not app.config['TELEGRAM_BOT_TOKEN']:
         print("TELEGRAM_BOT_TOKEN is not set in app.config!")
@@ -143,6 +173,7 @@ def validate_telegram_data(init_data_raw):
     if auth_date_str:
         try:
             auth_date = datetime.fromtimestamp(int(auth_date_str))
+            # Data should not be older than 1 hour (3600 seconds)
             if datetime.now() - auth_date > timedelta(seconds=3600):
                 print("Telegram init_data is too old.")
                 return False
@@ -160,29 +191,36 @@ def validate_telegram_data(init_data_raw):
 
     return True
 
-# --- Admin protection middleware ---
-def check_admin_credentials(username, password):
-    correct_username = os.environ.get('ADMIN_USERNAME', 'admin')
-    correct_password = os.environ.get('ADMIN_PASSWORD', 'securepassword')
-    return username == correct_username and password == correct_password
+# --- Admin Authentication (JWT-based) ---
+def get_admin_credentials():
+    """Retrieve admin username and password from environment variables."""
+    return {
+        "username": os.environ.get('ADMIN_USERNAME', 'admin'),
+        "password": os.environ.get('ADMIN_PASSWORD', 'securepassword') # NEVER use default 'securepassword' in production
+    }
 
 def require_admin_auth(f):
+    """Decorator to protect admin routes with JWT and check for admin role."""
     @wraps(f)
-    def decorated(*args, **kwargs):
-        auth = request.authorization
-        if not auth or not check_admin_credentials(auth.username, auth.password):
-            print(f"Admin auth failed for {request.path}")
-            return 'Could not verify your access level for that URL.\n' \
-                   'You have to login with proper credentials', 401, \
-                   {'WWW-Authenticate': 'Basic realm="Login Required"'}
-        return f(*args, **kwargs)
-    return decorated
+    @jwt_required() # Require a valid JWT token
+    def decorated_function(*args, **kwargs):
+        current_user_identity = get_jwt_identity() # Get the identity from the JWT (which is the username)
+        admin_creds = get_admin_credentials()
 
-# --- Middleware for Telegram Authentication ---
+        # Simple check: Is the logged-in user the configured admin username?
+        # In a real app, you'd have a 'roles' field in your DB and check that.
+        if current_user_identity != admin_creds["username"]:
+            return jsonify({"msg": "Admin access required"}), 403
+        
+        return f(*args, **kwargs)
+    return decorated_function
+
+# --- Middleware for Telegram Authentication (unchanged) ---
 @app.before_request
 def check_telegram_authentication():
     # Define a list of URL path prefixes that should be exempt from Telegram authentication.
-    exempt_prefixes = ['/admin', '/analytics', '/static']
+    # Now includes /admin_login
+    exempt_prefixes = ['/admin', '/analytics', '/static', '/admin_login', '/login.html']
     
     # Explicitly exempt the root path '/' and favicon.ico
     if request.path == '/' or request.path == '/favicon.ico':
@@ -408,9 +446,29 @@ def get_user_info():
         if conn:
             conn.close()
 
-# --- Admin Panel Routes ---
+# --- Admin Panel Login Route ---
+@app.route('/admin_login', methods=['POST'])
+def admin_login():
+    """Handles admin login and issues a JWT token."""
+    username = request.json.get('username', None)
+    password = request.json.get('password', None)
 
-@app.route('/admin') # <--- This is the URL that will display admin.html
+    admin_creds = get_admin_credentials()
+
+    if username == admin_creds["username"] and password == admin_creds["password"]:
+        access_token = create_access_token(identity=username)
+        return jsonify(access_token=access_token)
+    else:
+        return jsonify({"msg": "Bad username or password"}), 401
+
+@app.route('/login.html')
+def login_html_page():
+    return render_template('login.html')
+
+
+# --- Admin Panel Routes (protected by JWT) ---
+
+@app.route('/admin') # This is the URL that will display admin.html
 @require_admin_auth
 def admin_panel():
     return render_template('admin.html')
@@ -505,7 +563,9 @@ def admin_users():
         params = []
         
         if search_query:
-            sql_query += " WHERE user_id::text ILIKE %s OR username ILIKE %s"
+            sql_query += " WHERE user_id::text ILIKE %s OR username ILIKE %s OR first_name ILIKE %s OR last_name ILIKE %s"
+            params.append(f"%{search_query}%")
+            params.append(f"%{search_query}%")
             params.append(f"%{search_query}%")
             params.append(f"%{search_query}%")
 
