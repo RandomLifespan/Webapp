@@ -9,10 +9,7 @@ import hmac
 import secrets
 import urllib.parse
 import json
-from flask_wtf.csrf import CSRFProtect
-from flask_talisman import Talisman
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
+
 app = Flask(__name__)
 
 # Configuration
@@ -21,28 +18,18 @@ app.config['TELEGRAM_BOT_TOKEN'] = os.environ.get('TELEGRAM_BOT_TOKEN', '')
 app.config['SESSION_COOKIE_NAME'] = 'admin_session' # Name for the session cookie
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7) # Optional: Session lifetime
 
-app.config['SESSION_COOKIE_SECURE'] = True
-app.config['SESSION_COOKIE_HTTPONLY'] = True
-app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-
-csrf = CSRFProtect(app)
-talisman = Talisman(app, content_security_policy=None) # Disables strict CSP to not break UI
-limiter = Limiter(
-    get_remote_address,
-    app=app,
-    default_limits=["200 per day", "50 per hour"]
-)
-
 # --- PostgreSQL Database Connection ---
 def get_db_connection():
     try:
         db_url = os.environ.get('DATABASE_URL')
         if not db_url:
-            app.logger.error("DATABASE_URL environment variable is not set.")
+            print("DATABASE_URL environment variable is not set. Cannot connect to DB.")
             raise ValueError("DATABASE_URL environment variable is not set.")
-        return psycopg2.connect(db_url)
+
+        conn = psycopg2.connect(db_url)
+        return conn
     except Exception as e:
-        app.logger.error(f"Error connecting to PostgreSQL database: {e}")
+        print(f"Error connecting to PostgreSQL database: {e}")
         raise
 
 def init_db():
@@ -50,104 +37,176 @@ def init_db():
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        # All your CREATE TABLE statements remain the same...
+
         cur.execute('''
         CREATE TABLE IF NOT EXISTS users (
-            id SERIAL PRIMARY KEY, user_id BIGINT NOT NULL UNIQUE, first_name TEXT,
-            last_name TEXT, username TEXT, language_code TEXT, is_premium BOOLEAN,
+            id SERIAL PRIMARY KEY,
+            user_id BIGINT NOT NULL UNIQUE,
+            first_name TEXT,
+            last_name TEXT,
+            username TEXT,
+            language_code TEXT,
+            is_premium BOOLEAN,
             created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
             last_seen TIMESTAMP WITHOUT TIME ZONE NOT NULL,
             interactions INTEGER DEFAULT 1
-        );''')
+        );
+        ''')
+
         cur.execute('''
         CREATE TABLE IF NOT EXISTS user_sessions (
-            session_id TEXT PRIMARY KEY, user_id BIGINT NOT NULL, ip_address TEXT,
-            user_agent TEXT, referrer TEXT, created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+            session_id TEXT PRIMARY KEY,
+            user_id BIGINT NOT NULL,
+            ip_address TEXT,
+            user_agent TEXT,
+            referrer TEXT,
+            created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
             last_activity TIMESTAMP WITHOUT TIME ZONE NOT NULL,
             FOREIGN KEY (user_id) REFERENCES users (user_id) ON DELETE CASCADE
-        );''')
+        );
+        ''')
+
         cur.execute('''
         CREATE TABLE IF NOT EXISTS user_events (
-            event_id SERIAL PRIMARY KEY, user_id BIGINT NOT NULL, event_type TEXT NOT NULL,
-            event_data JSONB, created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+            event_id SERIAL PRIMARY KEY,
+            user_id BIGINT NOT NULL,
+            event_type TEXT NOT NULL,
+            event_data JSONB,
+            created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
             FOREIGN KEY (user_id) REFERENCES users (user_id) ON DELETE CASCADE
-        );''')
+        );
+        ''')
+
+        # NEW TABLE FOR POINTS
         cur.execute('''
         CREATE TABLE IF NOT EXISTS user_points (
             user_id BIGINT PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE,
             points INTEGER DEFAULT 0,
             last_generated_at TIMESTAMP WITHOUT TIME ZONE
-        );''')
+        );
+        ''')
+
         conn.commit()
         print("PostgreSQL tables checked/created successfully.")
     except Exception as e:
         print(f"Error initializing PostgreSQL database: {e}")
-        if conn: conn.rollback()
+        if conn:
+            conn.rollback()
         raise
     finally:
-        if conn: conn.close()
+        if conn:
+            conn.close()
 
+# Call init_db during application startup
 init_db()
 
 
 # --- Security helper functions ---
 def validate_telegram_data(init_data_raw):
-    # This function was already secure, no changes needed
     if not app.config['TELEGRAM_BOT_TOKEN']:
-        app.logger.error("TELEGRAM_BOT_TOKEN is not set!")
+        print("TELEGRAM_BOT_TOKEN is not set in app.config!")
         return False
+
     params = urllib.parse.parse_qs(init_data_raw)
-    hash_value = params.pop('hash', [None])[0]
-    if not hash_value:
-        return False
-    
-    data_check_string_parts = [f"{k}={v[0]}" for k, v in sorted(params.items())]
+    data_check_string_parts = []
+    hash_value = None
+
+    for key, value in sorted(params.items()):
+        current_value = value[0] if isinstance(value, list) else value
+
+        if key == 'hash':
+            hash_value = current_value
+        else:
+            data_check_string_parts.append(f"{key}={current_value}")
+
     data_check_string = '\n'.join(data_check_string_parts)
-    
-    secret_key = hmac.new("WebAppData".encode(), app.config['TELEGRAM_BOT_TOKEN'].encode(), hashlib.sha256).digest()
-    calculated_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+
+    if not hash_value:
+        print("Hash value not found in init_data.")
+        return False
+
+    secret_key = hmac.new(
+        key="WebAppData".encode('utf-8'),
+        msg=app.config['TELEGRAM_BOT_TOKEN'].encode('utf-8'),
+        digestmod=hashlib.sha256
+    ).digest()
+
+    calculated_hash = hmac.new(
+        key=secret_key,
+        msg=data_check_string.encode('utf-8'),
+        digestmod=hashlib.sha256
+    ).hexdigest()
 
     if not hmac.compare_digest(calculated_hash, hash_value):
+        print(f"Validation failed: Calculated hash {calculated_hash} != Provided hash {hash_value}")
         return False
 
     auth_date_str = params.get('auth_date', [None])[0]
-    if auth_date_str and (datetime.now() - datetime.fromtimestamp(int(auth_date_str))).total_seconds() > 3600:
-        return False # Data is too old
+    if auth_date_str:
+        try:
+            auth_date = datetime.fromtimestamp(int(auth_date_str))
+            if datetime.now() - auth_date > timedelta(seconds=3600):
+                print("Telegram init_data is too old.")
+                return False
+        except ValueError:
+            print("Invalid auth_date format.")
+            return False
 
+    # Store user data in g for the request
     user_data_json = params.get('user', [None])[0]
-    g.telegram_user = json.loads(user_data_json) if user_data_json else None
+    if user_data_json:
+        g.telegram_user = json.loads(user_data_json)
+    else:
+        g.telegram_user = None # Or a default empty dict if you prefer
+        print("Warning: Telegram init data missing 'user' object.")
+
     return True
 
 # --- Admin protection middleware ---
 def check_admin_credentials(username, password):
     correct_username = os.environ.get('ADMIN_USERNAME', 'admin')
     correct_password = os.environ.get('ADMIN_PASSWORD', 'securepassword')
-    
-    is_user_ok = hmac.compare_digest(username or '', correct_username)
-    is_pass_ok = hmac.compare_digest(password or '', correct_password)
+    return username == correct_username and password == correct_password
 
-    return is_user_ok and is_pass_ok
 # Modified require_admin_auth to use session
 def require_admin_auth(f):
     @wraps(f)
     def decorated(*args, **kwargs):
-        if session.get('admin_logged_in'):
+        if 'admin_logged_in' in session and session['admin_logged_in']:
+            # User is logged in via session, proceed with the request
             return f(*args, **kwargs)
-        return redirect(url_for('admin_login'))
+        else:
+            # Not logged in, redirect to the login page
+            print(f"Admin auth failed for {request.path}. Redirecting to login.")
+            return redirect(url_for('admin_login'))
     return decorated
 
 # --- Middleware for Telegram Authentication ---
 @app.before_request
 def check_telegram_authentication():
-    # Exemption logic is fine, no changes needed
-    exempt_paths = ['/admin', '/static', '/favicon.ico', '/']
-    if any(request.path.startswith(p) for p in exempt_paths):
+    # Define a list of URL path prefixes that should be exempt from Telegram authentication.
+    # Now include /admin/login explicitly
+    exempt_prefixes = ['/admin/login', '/admin', '/analytics', '/static']
+
+    # Explicitly exempt the root path '/' and favicon.ico
+    if request.path == '/' or request.path == '/favicon.ico':
         return None
 
+    for prefix in exempt_prefixes:
+        if request.path.startswith(prefix):
+            return None # Allow the request to proceed to the next handler/route
+
+    # If not exempt, proceed with Telegram authentication
     telegram_init_data = request.headers.get('X-Telegram-Init-Data')
-    if not telegram_init_data or not validate_telegram_data(telegram_init_data):
-        return jsonify({'error': 'Unauthorized'}), 401
-    return None
+
+    if not telegram_init_data:
+        print(f"Missing X-Telegram-Init-Data for non-exempt route: {request.path}")
+        return jsonify({'error': 'Unauthorized: Missing X-Telegram-Init-Data header'}), 401
+
+    if not validate_telegram_data(telegram_init_data):
+        return jsonify({'error': 'Unauthorized: Invalid Telegram data'}), 401
+
+    pass # Let the request proceed
 
 
 # --- Routes ---
@@ -158,35 +217,43 @@ def index():
 
 # NEW: Admin Login Route
 @app.route('/admin/login', methods=['GET', 'POST'])
-@limiter.limit("10 per minute")
 def admin_login():
     if request.method == 'POST':
-        data = request.get_json() or {}
-        if check_admin_credentials(data.get('username'), data.get('password')):
-            session.permanent = True
+        data = request.get_json()
+        username = data.get('username')
+        password = data.get('password')
+
+        if check_admin_credentials(username, password):
             session['admin_logged_in'] = True
-            # DO NOT store credentials in session
+            # Store credentials in session for future use by fetch wrapper in admin.html
+            # Note: Storing password directly in session is generally not recommended for
+            # production, but for simplicity with basic auth proxy, it's used here.
+            # For higher security, you'd use a token or similar.
+            session['admin_username'] = username
+            session['admin_password'] = password
             return jsonify({'message': 'Login successful'}), 200
         else:
             return jsonify({'error': 'Invalid credentials'}), 401
-    
-    if session.get('admin_logged_in'):
-        return redirect(url_for('admin_panel'))
-    return render_template('login.html')
+    else:
+        # If already logged in, redirect to admin dashboard
+        if 'admin_logged_in' in session and session['admin_logged_in']:
+            return redirect(url_for('admin_panel'))
+        return render_template('login.html')
 
 # NEW: Admin Logout Route
-
 @app.route('/admin/logout')
 def admin_logout():
-    session.clear() # Clears the entire session securely
+    session.pop('admin_logged_in', None)
+    session.pop('admin_username', None)
+    session.pop('admin_password', None)
     return redirect(url_for('admin_login'))
 
 
 @app.route('/generate_points', methods=['POST'])
 def generate_points():
-    if not getattr(g, 'telegram_user', None):
-        return jsonify({'error': 'Unauthorized'}), 401
-        
+    if not hasattr(g, 'telegram_user') or not g.telegram_user:
+        return jsonify({'error': 'Unauthorized: Telegram user data not found.'}), 401
+
     user_id = g.telegram_user['id']
     now = datetime.now()
     cooldown_duration = timedelta(minutes=5) # 5 minutes cooldown
@@ -244,17 +311,18 @@ def generate_points():
         })
 
     except Exception as e:
-        # SECURE CHANGE: Log detailed error, return generic message
-        app.logger.error(f"Error in generate_points for user {user_id}: {e}")
-        if conn: conn.rollback()
-        return jsonify({'error': 'An internal error occurred.'}), 500
+        print(f"Error generating points for user {user_id}: {e}")
+        if conn:
+            conn.rollback()
+        return jsonify({'error': str(e)}), 500
     finally:
-        if conn: conn.close()
+        if conn:
+            conn.close()
 
 @app.route('/get_user_points', methods=['GET'])
 def get_user_points():
-    if not getattr(g, 'telegram_user', None):
-        return jsonify({'error': 'Unauthorized'}), 401
+    if not hasattr(g, 'telegram_user') or not g.telegram_user:
+        return jsonify({'error': 'Unauthorized: Telegram user data not found.'}), 401
 
     user_id = g.telegram_user['id']
     conn = None
@@ -278,9 +346,8 @@ def get_user_points():
                 'message': 'No points found for this user.'
             })
     except Exception as e:
-        app.logger.error(f"Error fetching points for user {user_id}: {e}")
-        if conn: conn.rollback()
-        return jsonify({'error': 'An internal error occurred.'}), 500
+        print(f"Error fetching points for user {user_id}: {e}")
+        return jsonify({'error': str(e)}), 500
     finally:
         if conn:
             conn.close()
@@ -288,8 +355,8 @@ def get_user_points():
 @app.route('/get_user_info', methods=['POST'])
 def get_user_info():
     # We expect g.telegram_user to be set by the before_request middleware
-    if not getattr(g, 'telegram_user', None):
-        return jsonify({'error': 'Unauthorized'}), 401
+    if not hasattr(g, 'telegram_user') or not g.telegram_user:
+        return jsonify({'error': 'Telegram user data not found in request context.'}), 400
 
     user_data = g.telegram_user # Get user data from g object
     now = datetime.now()
@@ -371,9 +438,10 @@ def get_user_info():
         })
 
     except Exception as e:
-        app.logger.error(f"Error in get_user_info: {e}")
-        if conn: conn.rollback()
-        return jsonify({'error': 'An internal error occurred.'}), 500
+        print(f"Error in get_user_info: {e}")
+        if conn:
+            conn.rollback()
+        return jsonify({'error': str(e)}), 500
     finally:
         if conn:
             conn.close()
@@ -407,11 +475,9 @@ def user_count():
         today = active_today_data['active_today'] if active_today_data else 0
 
         return jsonify({'total_users': total, 'active_today': today})
-        
     except Exception as e:
-        app.logger.error(f"Error in user_count: {e}")
-        if conn: conn.rollback()
-        return jsonify({'error': 'An internal error occurred.'}), 500
+        print(f"Error in user_count: {e}")
+        return jsonify({'error': str(e)}), 500
     finally:
         if conn:
             conn.close()
@@ -440,9 +506,8 @@ def user_growth():
             serialized_growth.append(row_dict)
         return jsonify(serialized_growth)
     except Exception as e:
-        app.logger.error(f"Error in user_growth: {e}")
-        if conn: conn.rollback()
-        return jsonify({'error': 'An internal error occurred.'}), 500
+        print(f"Error in user_growth: {e}")
+        return jsonify({'error': str(e)}), 500
     finally:
         if conn:
             conn.close()
@@ -465,9 +530,8 @@ def top_events():
         # No datetime objects here, so direct jsonify is fine
         return jsonify([dict(row) for row in events])
     except Exception as e:
-        app.logger.error(f"Error in top_events: {e}")
-        if conn: conn.rollback()
-        return jsonify({'error': 'An internal error occurred.'}), 500
+        print(f"Error in top_events: {e}")
+        return jsonify({'error': str(e)}), 500
     finally:
         if conn:
             conn.close()
@@ -519,9 +583,8 @@ def admin_users():
         return jsonify(serialized_users)
 
     except Exception as e:
-        app.logger.error(f"Error fetching admin users: {e}")
-        if conn: conn.rollback()
-        return jsonify({'error': 'An internal error occurred.'}), 500
+        print(f"Error fetching admin users: {e}")
+        return jsonify({'error': 'Failed to retrieve user data: ' + str(e)}), 500
     finally:
         if conn:
             conn.close()
@@ -544,9 +607,8 @@ def get_user_profile(user_id):
             return jsonify(user_dict)
         return jsonify({'error': 'User not found'}), 404
     except Exception as e:
-        app.logger.error(f"Error fetching user profile for {user_id}: {e}")
-        if conn: conn.rollback()
-        return jsonify({'error': 'An internal error occurred.'}), 500
+        print(f"Error fetching user profile for {user_id}: {e}")
+        return jsonify({'error': str(e)}), 500
     finally:
         if conn:
             conn.close()
@@ -573,9 +635,8 @@ def get_user_sessions(user_id):
 
         return jsonify(serialized_sessions)
     except Exception as e:
-        app.logger.error(f"Error fetching user sessions for {user_id}: {e}")
-        if conn: conn.rollback()
-        return jsonify({'error': 'An internal error occurred.'}), 500
+        print(f"Error fetching user sessions for {user_id}: {e}")
+        return jsonify({'error': str(e)}), 500
     finally:
         if conn:
             conn.close()
@@ -601,9 +662,8 @@ def get_user_events(user_id):
 
         return jsonify(serialized_events)
     except Exception as e:
-        app.logger.error(f"Error fetching user events for {user_id}: {e}")
-        if conn: conn.rollback()
-        return jsonify({'error': 'An internal error occurred.'}), 500     
+        print(f"Error fetching user events for {user_id}: {e}")
+        return jsonify({'error': str(e)}), 500
     finally:
         if conn:
             conn.close()
@@ -627,13 +687,14 @@ def delete_user_data(user_id):
             return jsonify({'message': f'User {user_id} and associated data deleted successfully.'}), 200
         return jsonify({'message': 'User not found or no data to delete.'}), 404
     except Exception as e:
-        app.logger.error(f"Error deleting user {user_id}: {e}")
-        if conn: conn.rollback()
-        return jsonify({'error': 'An internal error occurred.'}), 500     
+        print(f"Error deleting user {user_id}: {e}")
+        if conn:
+            conn.rollback()
+        return jsonify({'error': str(e)}), 500
     finally:
         if conn:
             conn.close()
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    app.run(host='0.0.0.0', port=port, debug=True)
