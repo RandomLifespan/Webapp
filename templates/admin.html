@@ -221,43 +221,42 @@
         }
 
         // Global fetch wrapper to include Authorization header and handle 401s
-        const originalFetch = window.fetch;
-        window.fetch = async function(url, options = {}) {
-            const token = getAuthToken();
-            if (token) {
-                options.headers = {
-                    ...options.headers,
-                    'Authorization': `Bearer ${token}`
-                };
-            }
+        // Replace the existing fetch wrapper with this:
+const originalFetch = window.fetch;
+window.fetch = async function(url, options = {}) {
+    // Skip adding auth header for login route
+    if (url.includes('/login')) {
+        return originalFetch(url, options);
+    }
 
-            try {
-                const response = await originalFetch(url, options);
-
-                // Handle 401 Unauthorized globally
-                if (response.status === 401 || response.status === 403) { // Also check for 403
-                    console.warn(`Authentication issue (${response.status}). Redirecting to login.`);
-                    alert('Session expired or unauthorized. Please log in again.');
-                    localStorage.removeItem('access_token'); // Clear invalid token
-                    window.location.href = '/login.html'; // Redirect to login page
-                    // Important: Instead of returning response here, throw an error or handle it
-                    // so that the calling function doesn't try to process an unauthorized response.
-                    throw new Error('Unauthorized or Forbidden access.');
-                }
-
-                return response;
-            } catch (error) {
-                console.error('Network or unhandled error during fetch:', error);
-                throw error; // Re-throw to be caught by specific fetch functions
-            }
+    // Get token from both storage locations
+    const token = localStorage.getItem('access_token') || sessionStorage.getItem('access_token');
+    
+    if (token) {
+        options.headers = {
+            ...options.headers,
+            'Authorization': `Bearer ${token}`
         };
+    }
 
+    const response = await originalFetch(url, options);
+
+    // Handle unauthorized responses
+    if (response.status === 401) {
+        localStorage.removeItem('access_token');
+        sessionStorage.removeItem('access_token');
+        window.location.href = '/login.html';
+        return Promise.reject(new Error('Unauthorized'));
+    }
+
+    return response;
+};
         // Logout function
         logoutButton.addEventListener('click', () => {
-            localStorage.removeItem('access_token'); // Changed to localStorage
-            alert('You have been logged out.');
-            window.location.href = '/login.html'; // Redirect to login page
-        });
+    localStorage.removeItem('access_token');
+    sessionStorage.removeItem('access_token');
+    window.location.href = '/login.html';
+});
 
         // --- DATA FETCHING FUNCTIONS ---
 
@@ -492,15 +491,18 @@
 
         // Initial load
         document.addEventListener('DOMContentLoaded', () => {
-            // Check if token exists, otherwise redirect to login
-            if (!getAuthToken()) {
-                window.location.href = '/login.html';
-                return; // Stop further execution
-            }
-            setLoggedInUserDisplay(); // Display username if token is present
-            fetchOverviewData();
-            fetchAndDisplayUsers();
-        });
+    const token = localStorage.getItem('access_token') || sessionStorage.getItem('access_token');
+    
+    if (!token) {
+        window.location.href = '/login.html';
+        return;
+    }
+    
+    // Set up the rest of your page
+    setLoggedInUserDisplay();
+    fetchOverviewData();
+    fetchAndDisplayUsers();
+});
 
     </script>
 </body>
