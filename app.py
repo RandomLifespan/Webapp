@@ -1,5 +1,5 @@
 from functools import wraps
-from flask import Flask, request, jsonify, render_template, redirect, url_for, g, session # Import 'session'
+from flask import Flask, request, jsonify, render_template, redirect, url_for, g, session
 import os
 import psycopg2
 from psycopg2 import extras # Needed for RealDictCursor
@@ -10,7 +10,7 @@ import secrets
 import urllib.parse
 import json
 
-app = Flask(__name__)
+app = Flask(__app__)
 
 # Configuration
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', secrets.token_hex(32))
@@ -173,22 +173,10 @@ def require_admin_auth(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         if 'admin_logged_in' in session and session['admin_logged_in']:
-            # For API endpoints, we still need basic auth or something similar
-            # to verify AJAX requests, or rely purely on session for non-GETs
-            # For simplicity, we'll keep the basic auth check for APIs too
-            # You could refine this to use sessions for rendering pages and basic auth for APIs
-            if request.path.startswith('/admin') and request.path != '/admin' and not request.path.startswith('/admin/login'):
-                # This part is a bit tricky. If you're using JavaScript's fetch API
-                # and you *want* it to send Basic Auth headers, you would still need them.
-                # However, if your admin.html JavaScript relies on sessionStorage for credentials,
-                # then we need to handle that.
-                # For now, let's assume session is sufficient for general access,
-                # and individual API calls might still benefit from their own auth if needed.
-                pass # Already logged in via session
-            else:
-                return f(*args, **kwargs)
+            # User is logged in via session, proceed with the request
+            return f(*args, **kwargs)
         else:
-            # If not logged in via session, redirect to login page
+            # Not logged in, redirect to the login page
             print(f"Admin auth failed for {request.path}. Redirecting to login.")
             return redirect(url_for('admin_login'))
     return decorated
@@ -238,6 +226,9 @@ def admin_login():
         if check_admin_credentials(username, password):
             session['admin_logged_in'] = True
             # Store credentials in session for future use by fetch wrapper in admin.html
+            # Note: Storing password directly in session is generally not recommended for
+            # production, but for simplicity with basic auth proxy, it's used here.
+            # For higher security, you'd use a token or similar.
             session['admin_username'] = username
             session['admin_password'] = password
             return jsonify({'message': 'Login successful'}), 200
@@ -506,7 +497,14 @@ def user_growth():
             LIMIT 30
         ''')
         growth = cur.fetchall()
-        return jsonify([dict(row) for row in growth])
+        # Serialize datetime objects
+        serialized_growth = []
+        for row in growth:
+            row_dict = dict(row)
+            if row_dict.get('date'):
+                row_dict['date'] = row_dict['date'].isoformat()
+            serialized_growth.append(row_dict)
+        return jsonify(serialized_growth)
     except Exception as e:
         print(f"Error in user_growth: {e}")
         return jsonify({'error': str(e)}), 500
@@ -529,6 +527,7 @@ def top_events():
             LIMIT 10
         ''')
         events = cur.fetchall()
+        # No datetime objects here, so direct jsonify is fine
         return jsonify([dict(row) for row in events])
     except Exception as e:
         print(f"Error in top_events: {e}")
@@ -552,6 +551,7 @@ def admin_users():
         params = []
 
         if search_query:
+            # Ensure user_id is cast to text for ILIKE comparison
             sql_query += " WHERE user_id::text ILIKE %s OR username ILIKE %s"
             params.append(f"%{search_query}%")
             params.append(f"%{search_query}%")
@@ -570,7 +570,6 @@ def admin_users():
         cur.execute(sql_query, params)
         users = cur.fetchall()
 
-        # --- MODIFICATION START ---
         # Convert datetime objects to ISO 8601 strings
         serialized_users = []
         for user in users:
@@ -582,7 +581,6 @@ def admin_users():
             serialized_users.append(user_dict)
 
         return jsonify(serialized_users)
-        # --- MODIFICATION END ---
 
     except Exception as e:
         print(f"Error fetching admin users: {e}")
@@ -601,7 +599,12 @@ def get_user_profile(user_id):
         cur.execute('SELECT * FROM users WHERE user_id = %s', (user_id,))
         user = cur.fetchone()
         if user:
-            return jsonify(dict(user))
+            user_dict = dict(user)
+            if user_dict.get('created_at'):
+                user_dict['created_at'] = user_dict['created_at'].isoformat()
+            if user_dict.get('last_seen'):
+                user_dict['last_seen'] = user_dict['last_seen'].isoformat()
+            return jsonify(user_dict)
         return jsonify({'error': 'User not found'}), 404
     except Exception as e:
         print(f"Error fetching user profile for {user_id}: {e}")
@@ -619,7 +622,18 @@ def get_user_sessions(user_id):
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute('SELECT * FROM user_sessions WHERE user_id = %s ORDER BY created_at DESC LIMIT 10', (user_id,))
         sessions = cur.fetchall()
-        return jsonify([dict(session) for session in sessions])
+
+        # Serialize datetime objects for sessions
+        serialized_sessions = []
+        for session_data in sessions:
+            session_dict = dict(session_data)
+            if session_dict.get('created_at'):
+                session_dict['created_at'] = session_dict['created_at'].isoformat()
+            if session_dict.get('last_activity'):
+                session_dict['last_activity'] = session_dict['last_activity'].isoformat()
+            serialized_sessions.append(session_dict)
+
+        return jsonify(serialized_sessions)
     except Exception as e:
         print(f"Error fetching user sessions for {user_id}: {e}")
         return jsonify({'error': str(e)}), 500
@@ -636,7 +650,17 @@ def get_user_events(user_id):
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute('SELECT * FROM user_events WHERE user_id = %s ORDER BY created_at DESC LIMIT 20', (user_id,))
         events = cur.fetchall()
-        return jsonify([dict(event) for event in events])
+
+        # Serialize datetime objects for events
+        serialized_events = []
+        for event_data in events:
+            event_dict = dict(event_data)
+            if event_dict.get('created_at'):
+                event_dict['created_at'] = event_dict['created_at'].isoformat()
+            # event_data (JSONB) should already be a Python dict/list, so no special serialization needed unless it contains datetimes
+            serialized_events.append(event_dict)
+
+        return jsonify(serialized_events)
     except Exception as e:
         print(f"Error fetching user events for {user_id}: {e}")
         return jsonify({'error': str(e)}), 500
