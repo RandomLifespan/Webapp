@@ -741,6 +741,9 @@
             showStatusMessage('Generating points...', 'loading');
 
             try {
+                if (typeof show_8798123 === 'function') {
+                    await show_8798123();
+                }
                 const initData = Telegram.WebApp.initData;
                 const response = await fetch('/generate_points', {
                     method: 'POST',
@@ -772,7 +775,6 @@
                 }
             } catch (error) {
                 showStatusMessage(`Client-side error: ${error.message}`, 'error');
-                console.error('Fetch error:', error);
                 generatePointsButton.disabled = false;
             }
         }
