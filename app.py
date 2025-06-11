@@ -32,18 +32,17 @@ csrf._exempt_views.add('api.use_service')
 
 REDIS_URL = os.environ.get("REDIS_URL")
 if REDIS_URL:
-    limiter = Limiter(
-        key_func=get_remote_address,
-        default_limits=["200 per day", "50 per hour"],
-        storage_uri=REDIS_URL,
-        app=app
-    )
+    storage_uri = REDIS_URL
     print(f"Flask-Limiter configured with Redis: {REDIS_URL}")
 else:
-    limiter = Limiter(
+    storage_uri = "memory://"
+    print("WARNING: REDIS_URL environment variable is not set. Flask-Limiter will use in-memory storage (NOT for production).")
+
+limiter = Limiter(
     app=app,
     key_func=get_remote_address,
-    default_limits=["200 per day", "50 per hour"]
+    default_limits=["200 per day", "50 per hour"],
+    storage_uri=storage_uri # Use the determined storage_uri
 )
 
 # --- PostgreSQL Database Connection ---
