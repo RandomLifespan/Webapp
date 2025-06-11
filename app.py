@@ -221,8 +221,7 @@ def api_key_required(f):
             app.logger.error("API key is missing from headers")
             return jsonify({
                 'error': 'API key is missing',
-                'message': 'Please include your API key in the X-API-Key header',
-                'received_headers': dict(request.headers)
+                'message': 'Please include your API key in the X-API-Key header'
             }), 401
 
         # Debug: Print the API key
