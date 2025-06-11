@@ -488,6 +488,22 @@
                     </span>
                     <span class="info-value" id="username">Loading...</span>
                 </div>
+
+                <div class="info-item">
+                    <span class="info-label">
+                        <i class="fas fa-key"></i>
+                        API Key
+                    </span>
+                    <span class="info-value" id="apiKey">Loading...</span>
+                </div>
+                <button class="generate-button" id="generateApiKeyButton" style="margin-top: 16px;">
+                    <i class="fas fa-key"></i>
+                    Generate New API Key
+                </button>
+                <div id="apiKeyMessage" class="status-message" style="margin-top: 16px;">
+                    
+                </div>
+                
             </div>
         </div>
 
@@ -506,10 +522,13 @@
         const cooldownTimerDisplay = document.getElementById('cooldown-timer');
         const cooldownText = document.getElementById('cooldown-text');
         const tabIndicator = document.getElementById('tabIndicator');
-
         const tabButtons = document.querySelectorAll('.tab-button');
         const tabContents = document.querySelectorAll('.tab-content');
-
+        
+        const apiKeySpan = document.getElementById('apiKey');
+        const generateApiKeyButton = document.getElementById('generateApiKeyButton');
+        const apiKeyMessage = document.getElementById('apiKeyMessage');
+        
         let cooldownEndDate = null;
         const COOLDOWN_MINUTES = 5;
 
@@ -580,6 +599,107 @@
             }
         }
 
+
+// Function to fetch current API key
+        async function fetchApiKey() {
+            try {
+                const initData = Telegram.WebApp.initData;
+                const response = await fetch('/get_api_key', {
+                    method: 'GET',
+                    headers: {
+                        'X-Telegram-Init-Data': initData,
+                        'X-CSRFToken': csrfToken
+                    }
+                });
+        
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || `HTTP error! Status: ${response.status}`);
+                }
+        
+                const data = await response.json();
+                if (data.status === 'success') {
+                    if (data.has_api_key) {
+                        apiKeySpan.textContent = data.api_key;
+                    } else {
+                        apiKeySpan.textContent = 'No API key generated';
+                    }
+                } else {
+                    apiKeySpan.textContent = 'Error';
+                    showCustomMessage(apiKeyMessage, `Failed to load API key: ${data.message}`, 'error');
+                }
+            } catch (error) {
+                apiKeySpan.textContent = 'Error';
+                showCustomMessage(apiKeyMessage, `Error loading API key: ${error.message}`, 'error');
+            }
+        }
+        
+        // Function to generate new API key
+        async function handleGenerateApiKey() {
+            generateApiKeyButton.disabled = true;
+            showCustomMessage(apiKeyMessage, 'Generating new API key...', 'loading');
+        
+            try {
+                const initData = Telegram.WebApp.initData;
+                const response = await fetch('/generate_api_key', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Telegram-Init-Data': initData,
+                        'X-CSRFToken': csrfToken
+                    }
+                });
+        
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.message || errorData.error || `HTTP error! Status: ${response.status}`);
+                }
+        
+                const data = await response.json();
+                if (data.status === 'success') {
+                    showCustomMessage(apiKeyMessage, data.message, 'success');
+                    apiKeySpan.textContent = data.api_key;
+                } else {
+                    showCustomMessage(apiKeyMessage, `Error: ${data.message || 'Unknown error from backend'}`, 'error');
+                }
+            } catch (error) {
+                showCustomMessage(apiKeyMessage, `Error: ${error.message}`, 'error');
+                console.error('API key generation error:', error);
+            } finally {
+                generateApiKeyButton.disabled = false;
+            }
+        }
+        
+        // Helper function for showing messages in the API key section
+        function showCustomMessage(element, message, type) {
+            element.innerHTML = '';
+            element.className = `status-message ${type}`;
+            
+            if (type === 'loading') {
+                element.innerHTML = `<div class="loading-spinner"></div>${message}`;
+            } else if (type === 'success') {
+                element.innerHTML = `<i class="fas fa-check-circle"></i>${message}`;
+            } else if (type === 'error') {
+                element.innerHTML = `<i class="fas fa-exclamation-circle"></i>${message}`;
+            }
+            
+            element.style.display = 'flex';
+            
+            if (type === 'success' || type === 'error') {
+                setTimeout(() => {
+                    element.style.display = 'none';
+                }, 5000);
+            }
+        }
+        
+        // Add event listener
+        generateApiKeyButton.addEventListener('click', handleGenerateApiKey);
+        
+        // Fetch API key when profile tab is shown
+        document.querySelector('.tab-button[data-tab="profile"]').addEventListener('click', fetchApiKey);
+        
+
+        
         // --- Fetch User Points Function ---
         async function fetchUserPoints() {
             try {
