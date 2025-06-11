@@ -73,6 +73,7 @@
             justify-content: space-between;
             align-items: center;
             position: relative;
+
         }
 
         h1 {
@@ -83,10 +84,15 @@
                 font-size: 1.8rem;
                 font-weight: 700;
                 margin: 0;
+                margin-top: 0px;
                 padding: 0;
-                flex-grow: 1;
                 text-align: center;
             }
+
+        @media (max-width: 480px) {
+    h1 {
+      margin-top: 18px; 
+    }}
 
         
         .settings-dropdown {
