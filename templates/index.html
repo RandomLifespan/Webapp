@@ -490,6 +490,7 @@
 
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script>
+        const csrfToken = "{{ csrf_token }}";
         const userIdSpan = document.getElementById('userId');
         const firstNameSpan = document.getElementById('firstName');
         const usernameSpan = document.getElementById('username');
@@ -580,7 +581,8 @@
                 const response = await fetch('/get_user_points', {
                     method: 'GET',
                     headers: {
-                        'X-Telegram-Init-Data': initData
+                        'X-Telegram-Init-Data': initData ,
+                        'X-CSRFToken': csrfToken
                     }
                 });
                 if (!response.ok) {
@@ -618,7 +620,8 @@
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'X-Telegram-Init-Data': initData
+                        'X-Telegram-Init-Data': initData ,
+                        'X-CSRFToken': csrfToken
                     }
                 });
 
@@ -671,7 +674,8 @@
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'X-Telegram-Init-Data': initData
+                        'X-Telegram-Init-Data': initData ,
+                        'X-CSRFToken': csrfToken
                     },
                     body: JSON.stringify({ user: user })
                 })
