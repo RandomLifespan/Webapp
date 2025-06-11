@@ -739,7 +739,6 @@
         async function handleGeneratePoints() {
             generatePointsButton.disabled = true;
             showStatusMessage('Generating points...', 'loading');
-
             try {
                 if (typeof show_8798123 === 'function') {
                     await show_8798123();
@@ -797,7 +796,7 @@
                 usernameSpan.textContent = user.username || 'N/A';
 
                 showStatusMessage('Initializing app...', 'loading');
-
+                
                 fetch('/get_user_info', {
                     method: 'POST',
                     headers: {
