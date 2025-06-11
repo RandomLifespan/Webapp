@@ -6,5 +6,5 @@ Flask-JWT-Extended==4.5.3
 Flask-Cors==4.0.0
 Flask-WTF
 Flask-Talisman
-Flask-Limiter
+Flask-Limiter[redis]
 Werkzeug
