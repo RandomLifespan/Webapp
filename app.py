@@ -94,7 +94,16 @@ def init_db():
             last_generated_at TIMESTAMP WITHOUT TIME ZONE
         );
         ''')
-
+        cur.execute('''
+        CREATE TABLE IF NOT EXISTS user_api_keys (
+            id SERIAL PRIMARY KEY,
+            user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+            api_key TEXT NOT NULL UNIQUE,
+            created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+            last_used_at TIMESTAMP WITHOUT TIME ZONE,
+            is_active BOOLEAN DEFAULT TRUE
+        );
+        ''')
         conn.commit()
         print("PostgreSQL tables checked/created successfully.")
     except Exception as e:
@@ -464,7 +473,101 @@ def get_user_info():
     finally:
         if conn:
             conn.close()
+@app.route('/generate_api_key', methods=['POST'])
+def generate_api_key():
+    if not hasattr(g, 'telegram_user') or not g.telegram_user:
+        return jsonify({'error': 'Unauthorized: Telegram user data not found.'}), 401
 
+    user_id = g.telegram_user['id']
+    now = datetime.now()
+    
+    # Generate a random API key
+    api_key = secrets.token_urlsafe(32)
+    
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        # First deactivate any existing keys
+        cur.execute('''
+            UPDATE user_api_keys 
+            SET is_active = FALSE 
+            WHERE user_id = %s AND is_active = TRUE
+        ''', (user_id,))
+        
+        # Insert the new key
+        cur.execute('''
+            INSERT INTO user_api_keys (user_id, api_key, created_at)
+            VALUES (%s, %s, %s)
+        ''', (user_id, api_key, now))
+        
+        # Log the event
+        cur.execute('''
+            INSERT INTO user_events (user_id, event_type, event_data, created_at)
+            VALUES (%s, %s, %s, %s)
+        ''', (user_id, 'api_key_generated', json.dumps({'action': 'generate'}), now))
+        
+        conn.commit()
+        
+        return jsonify({
+            'status': 'success',
+            'api_key': api_key,
+            'message': 'New API key generated successfully. Any previous keys have been deactivated.'
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error generating API key for user {user_id}: {e}")
+        if conn:
+            conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if conn:
+            conn.close()
+
+@app.route('/get_api_key', methods=['GET'])
+def get_api_key():
+    if not hasattr(g, 'telegram_user') or not g.telegram_user:
+        return jsonify({'error': 'Unauthorized: Telegram user data not found.'}), 401
+
+    user_id = g.telegram_user['id']
+    
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        
+        cur.execute('''
+            SELECT api_key, created_at 
+            FROM user_api_keys 
+            WHERE user_id = %s AND is_active = TRUE
+            ORDER BY created_at DESC 
+            LIMIT 1
+        ''', (user_id,))
+        
+        api_key_data = cur.fetchone()
+        
+        if api_key_data:
+            return jsonify({
+                'status': 'success',
+                'has_api_key': True,
+                'api_key': api_key_data['api_key'],
+                'created_at': api_key_data['created_at'].isoformat()
+            })
+        else:
+            return jsonify({
+                'status': 'success',
+                'has_api_key': False,
+                'message': 'No active API key found'
+            })
+            
+    except Exception as e:
+        app.logger.error(f"Error fetching API key for user {user_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if conn:
+            conn.close()
+            
 # --- Admin Panel Routes ---
 
 @app.route('/admin') # <--- This is the URL that will display admin.html
