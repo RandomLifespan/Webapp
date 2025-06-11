@@ -100,7 +100,7 @@
                         <th>First Name</th>
                         <th>Last Name</th>
                         <th>Username</th>
-                        <th id="currentPoints">Points</th>
+                        <th>Points</th>
                         <th>Interactions</th>
                         <th>Last Seen (UTC)</th>
                         <th>Created At (UTC)</th>
@@ -205,32 +205,6 @@
             }
             return response;
         };
-
-        async function fetchUserPoints() {
-            try {
-                const initData = Telegram.WebApp.initData;
-                const response = await fetch('/get_user_points', {
-                    method: 'GET',
-                    headers: {
-                        'X-Telegram-Init-Data': initData ,
-                        'X-CSRFToken': csrfToken
-                    }
-                });
-                if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(errorData.error || `HTTP error! Status: ${response.status}`);
-                }
-                const data = await response.json();
-                if (data.status === 'success') {
-                    currentPointsSpan.textContent = data.points;
-                }
-                catch (error) {
-                console.error('Error fetching user points:', error);
-                currentPointsSpan.textContent = 'Error';
-                showStatusMessage(`Error loading points: ${error.message}`, 'error');
-            }
-        }
-
                     
         // Function to fetch and display overview data
         async function fetchOverviewData() {
