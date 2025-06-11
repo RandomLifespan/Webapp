@@ -313,12 +313,17 @@
             display: flex;
             align-items: center;
             gap: 8px;
+            flex-shrink: 0;
+            min-width: 120px;
         }
 
         .info-value {
             color: #6b7280;
             font-weight: 500;
             word-break: break-all;
+            text-align: right; /* Align the value to the right */
+            flex-grow: 1; /* Allow the value to take up remaining space */
+            min-width: 0;
         }
 
         .status-message {
@@ -420,7 +425,8 @@
             }
 
             .info-value {
-                align-self: flex-end;
+                text-align: left; /* Align value to the left when stacked */
+                width: 100%;
             }
         }
     </style>
