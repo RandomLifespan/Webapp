@@ -113,13 +113,13 @@ def init_db():
             id SERIAL PRIMARY KEY,
             user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
             api_key TEXT NOT NULL UNIQUE,
-            api_secret TEXT NOT NULL,  # For request signing
-            allowed_ips CIDR[],  # IP whitelist
+            api_secret TEXT NOT NULL, 
+            CIDR[],  
             created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
             last_used_at TIMESTAMP WITHOUT TIME ZONE,
             expires_at TIMESTAMP WITHOUT TIME ZONE,
             is_active BOOLEAN DEFAULT TRUE,
-            rate_limit INTEGER DEFAULT 10,  # Requests per minute
+            rate_limit INTEGER DEFAULT 10, 
             usage_count INTEGER DEFAULT 0
         );
         ''')
