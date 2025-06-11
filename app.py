@@ -27,10 +27,10 @@ app.config['SESSION_COOKIE_NAME'] = 'admin_session'
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7) 
 
 # Enable CSRF protection for forms. This makes csrf_token() available in templates.
-# app.config['WTF_CSRF_ENABLED'] = True # Explicitly enable CSRF
+app.config['WTF_CSRF_ENABLED'] = True # Explicitly enable CSRF
 
 
-app.config['WTF_CSRF_CHECK_DEFAULT'] = False
+#app.config['WTF_CSRF_CHECK_DEFAULT'] = False
 
 csrf = CSRFProtect(app) # Initialize CSRFProtect
 csrf._exempt_views.add('api.use_service')
