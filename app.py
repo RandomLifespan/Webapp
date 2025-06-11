@@ -296,7 +296,7 @@ def require_admin_auth(f):
 @app.before_request
 def check_telegram_authentication():
 
-    exempt_prefixes = ['/admin', '/analytics', '/static' , '/api'] # Added logout
+    exempt_prefixes = ['/admin', '/analytics', '/static' , '/api' , '/style.css'] # Added logout
     if request.path == '/login.html':
         return redirect(url_for('admin_login'))
     if request.path == '/' or request.path == '/favicon.ico':
