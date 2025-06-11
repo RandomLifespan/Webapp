@@ -29,6 +29,8 @@ app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)
 # Enable CSRF protection for forms. This makes csrf_token() available in templates.
 app.config['WTF_CSRF_ENABLED'] = True # Explicitly enable CSRF
 csrf = CSRFProtect(app) # Initialize CSRFProtect
+csrf.exempt('api.use_service')
+csrf.exempt('api.check_balance')
 
 limiter = Limiter(
     app=app,
@@ -210,7 +212,11 @@ def api_key_required(f):
     def decorated(*args, **kwargs):
         api_key = request.headers.get('X-API-Key')
         if not api_key:
-            return jsonify({'error': 'API key is missing'}), 401
+            app.logger.error("API key is missing from headers")
+            return jsonify({
+                'error': 'API key is missing',
+                'message': 'Please include your API key in the X-API-Key header'
+            }), 401
 
         conn = None
         try:
@@ -226,7 +232,11 @@ def api_key_required(f):
             api_key_data = cur.fetchone()
             
             if not api_key_data:
-                return jsonify({'error': 'Invalid or inactive API key'}), 401
+                app.logger.error(f"Invalid or inactive API key provided: {api_key}")
+                return jsonify({
+                    'error': 'Invalid or inactive API key',
+                    'message': 'The provided API key is not valid or has been deactivated'
+                }), 401
                 
             # Store user_id in g for the request
             g.api_user_id = api_key_data['user_id']
@@ -241,7 +251,10 @@ def api_key_required(f):
             
         except Exception as e:
             app.logger.error(f"Error verifying API key: {e}")
-            return jsonify({'error': 'Internal server error'}), 500
+            return jsonify({
+                'error': 'Internal server error',
+                'message': 'An error occurred while verifying your API key'
+            }), 500
         finally:
             if conn:
                 conn.close()
@@ -627,8 +640,15 @@ def get_api_key():
 @limiter.limit("10 per minute")
 @api_key_required
 def use_service():
+    # Ensure the request is JSON
+    if not request.is_json:
+        return jsonify({
+            'error': 'Unsupported Media Type',
+            'message': 'Request must be JSON'
+        }), 415
+
     user_id = g.api_user_id
-    points_to_deduct = 10  # You can make this configurable if needed
+    points_to_deduct = 10
     
     conn = None
     try:
@@ -639,11 +659,21 @@ def use_service():
         cur.execute('SELECT points FROM user_points WHERE user_id = %s', (user_id,))
         user_points = cur.fetchone()
         
-        if not user_points or user_points[0] < points_to_deduct:
+        if not user_points:
             return jsonify({
                 'status': 'error',
-                'message': f'Insufficient points. You need at least {points_to_deduct} points to use this service.'
-            }), 400
+                'message': 'User points record not found',
+                'code': 'user_not_found'
+            }), 404
+            
+        if user_points[0] < points_to_deduct:
+            return jsonify({
+                'status': 'error',
+                'message': f'Insufficient points. You need at least {points_to_deduct} points to use this service.',
+                'required_points': points_to_deduct,
+                'current_points': user_points[0],
+                'code': 'insufficient_points'
+            }), 402  # 402 Payment Required
         
         # Deduct points
         new_points = user_points[0] - points_to_deduct
@@ -668,14 +698,20 @@ def use_service():
         return jsonify({
             'status': 'success',
             'message': f'Successfully used service. {points_to_deduct} points deducted.',
-            'remaining_points': new_points
+            'points_deducted': points_to_deduct,
+            'remaining_points': new_points,
+            'timestamp': datetime.now().isoformat()
         })
         
     except Exception as e:
         app.logger.error(f"Error in use_service endpoint for user {user_id}: {e}")
         if conn:
             conn.rollback()
-        return jsonify({'error': str(e)}), 500
+        return jsonify({
+            'error': 'Internal Server Error',
+            'message': 'An error occurred while processing your request',
+            'code': 'server_error'
+        }), 500
     finally:
         if conn:
             conn.close()
