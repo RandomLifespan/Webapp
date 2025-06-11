@@ -653,6 +653,54 @@ def get_api_key():
         if conn:
             conn.close()
             
+@app.route('/api/get_points', methods=['GET'])
+@limiter.limit("10 per minute")
+@api_key_required
+def api_get_points():
+  
+    user_id = g.api_user_id
+    
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        
+        # Get points data
+        cur.execute('''
+            SELECT points, last_generated_at 
+            FROM user_points 
+            WHERE user_id = %s
+        ''', (user_id,))
+        
+        points_data = cur.fetchone()
+        
+        if points_data:
+            return jsonify({
+                'status': 'success',
+                'points': points_data['points'],
+                'last_generated_at': points_data['last_generated_at'].isoformat() if points_data['last_generated_at'] else None,
+                'user_id': user_id
+            })
+        else:
+            return jsonify({
+                'status': 'success',
+                'points': 0,
+                'last_generated_at': None,
+                'user_id': user_id,
+                'message': 'No points record found - defaulting to 0'
+            })
+            
+    except Exception as e:
+        app.logger.error(f"Error fetching points via API for user {user_id}: {e}")
+        return jsonify({
+            'status': 'error',
+            'error': str(e),
+            'user_id': user_id
+        }), 500
+    finally:
+        if conn:
+            conn.close()
+            
 @app.route('/api/use_service', methods=['POST'])
 @limiter.limit("10 per minute")
 @api_key_required
