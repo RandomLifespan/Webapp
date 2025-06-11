@@ -11,6 +11,9 @@ import urllib.parse
 import json
 from flask_wtf.csrf import CSRFProtect, generate_csrf # Import CSRFProtect and generate_csrf
 from werkzeug.security import generate_password_hash, check_password_hash # Import for password hashing
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+
 
 app = Flask(__name__)
 
@@ -26,6 +29,12 @@ app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)
 # Enable CSRF protection for forms. This makes csrf_token() available in templates.
 app.config['WTF_CSRF_ENABLED'] = True # Explicitly enable CSRF
 csrf = CSRFProtect(app) # Initialize CSRFProtect
+
+limiter = Limiter(
+    app=app,
+    key_func=get_remote_address,
+    default_limits=["200 per day", "50 per hour"]
+)
 
 # --- PostgreSQL Database Connection ---
 def get_db_connection():
@@ -193,6 +202,52 @@ def check_admin_credentials(username, password):
         app.logger.error("ADMIN_PASSWORD_HASH environment variable is not set!")
         return False 
     return username == correct_username and check_password_hash(stored_password_hash, password)
+
+# --- Api key middleware
+
+def api_key_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        api_key = request.headers.get('X-API-Key')
+        if not api_key:
+            return jsonify({'error': 'API key is missing'}), 401
+
+        conn = None
+        try:
+            conn = get_db_connection()
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            
+            # Check if API key exists and is active
+            cur.execute('''
+                SELECT user_id FROM user_api_keys 
+                WHERE api_key = %s AND is_active = TRUE
+            ''', (api_key,))
+            
+            api_key_data = cur.fetchone()
+            
+            if not api_key_data:
+                return jsonify({'error': 'Invalid or inactive API key'}), 401
+                
+            # Store user_id in g for the request
+            g.api_user_id = api_key_data['user_id']
+            
+            # Update last used timestamp
+            cur.execute('''
+                UPDATE user_api_keys 
+                SET last_used_at = NOW() 
+                WHERE api_key = %s
+            ''', (api_key,))
+            conn.commit()
+            
+        except Exception as e:
+            app.logger.error(f"Error verifying API key: {e}")
+            return jsonify({'error': 'Internal server error'}), 500
+        finally:
+            if conn:
+                conn.close()
+                
+        return f(*args, **kwargs)
+    return decorated
 
 # Modified require_admin_auth to use session
 def require_admin_auth(f):
@@ -563,6 +618,99 @@ def get_api_key():
             
     except Exception as e:
         app.logger.error(f"Error fetching API key for user {user_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if conn:
+            conn.close()
+            
+@app.route('/api/use_service', methods=['POST'])
+@limiter.limit("10 per minute")
+@api_key_required
+def use_service():
+    user_id = g.api_user_id
+    points_to_deduct = 10  # You can make this configurable if needed
+    
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        # Check if user has enough points
+        cur.execute('SELECT points FROM user_points WHERE user_id = %s', (user_id,))
+        user_points = cur.fetchone()
+        
+        if not user_points or user_points[0] < points_to_deduct:
+            return jsonify({
+                'status': 'error',
+                'message': f'Insufficient points. You need at least {points_to_deduct} points to use this service.'
+            }), 400
+        
+        # Deduct points
+        new_points = user_points[0] - points_to_deduct
+        cur.execute('''
+            UPDATE user_points 
+            SET points = %s 
+            WHERE user_id = %s
+        ''', (new_points, user_id))
+        
+        # Log the event
+        cur.execute('''
+            INSERT INTO user_events (user_id, event_type, event_data, created_at)
+            VALUES (%s, %s, %s, NOW())
+        ''', (user_id, 'points_deducted', json.dumps({
+            'service': 'use_service',
+            'points_deducted': points_to_deduct,
+            'remaining_points': new_points
+        })))
+        
+        conn.commit()
+        
+        return jsonify({
+            'status': 'success',
+            'message': f'Successfully used service. {points_to_deduct} points deducted.',
+            'remaining_points': new_points
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error in use_service endpoint for user {user_id}: {e}")
+        if conn:
+            conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if conn:
+            conn.close()
+            
+@app.route('/api/check_balance', methods=['GET'])
+@api_key_required
+def check_balance():
+    user_id = g.api_user_id
+    
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        
+        cur.execute('''
+            SELECT points FROM user_points 
+            WHERE user_id = %s
+        ''', (user_id,))
+        
+        points_data = cur.fetchone()
+        
+        if points_data:
+            return jsonify({
+                'status': 'success',
+                'points': points_data['points']
+            })
+        else:
+            return jsonify({
+                'status': 'success',
+                'points': 0,
+                'message': 'No points record found'
+            })
+            
+    except Exception as e:
+        app.logger.error(f"Error checking balance for user {user_id}: {e}")
         return jsonify({'error': str(e)}), 500
     finally:
         if conn:
