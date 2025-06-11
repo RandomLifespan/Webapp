@@ -27,10 +27,11 @@ app.config['SESSION_COOKIE_NAME'] = 'admin_session'
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7) 
 
 # Enable CSRF protection for forms. This makes csrf_token() available in templates.
-app.config['WTF_CSRF_ENABLED'] = True # Explicitly enable CSRF
+# app.config['WTF_CSRF_ENABLED'] = True # Explicitly enable CSRF
+app.config['WTF_CSRF_CHECK_DEFAULT'] = False
+csrf._exempt_views.add('api.use_service')
 csrf = CSRFProtect(app) # Initialize CSRFProtect
-csrf.exempt('api.use_service')
-csrf.exempt('api.check_balance')
+
 
 limiter = Limiter(
     app=app,
@@ -210,20 +211,29 @@ def check_admin_credentials(username, password):
 def api_key_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
+        # Debug: Print all headers
+        app.logger.info(f"Incoming headers: {dict(request.headers)}")
+        
         api_key = request.headers.get('X-API-Key')
         if not api_key:
             app.logger.error("API key is missing from headers")
             return jsonify({
                 'error': 'API key is missing',
-                'message': 'Please include your API key in the X-API-Key header'
+                'message': 'Please include your API key in the X-API-Key header',
+                'received_headers': dict(request.headers)
             }), 401
 
+        # Debug: Print the API key
+        app.logger.info(f"Received API key: {api_key}")
+        
         conn = None
         try:
             conn = get_db_connection()
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
             
-            # Check if API key exists and is active
+            # Debug: Print the query being executed
+            app.logger.info(f"Executing query for API key: {api_key}")
+            
             cur.execute('''
                 SELECT user_id FROM user_api_keys 
                 WHERE api_key = %s AND is_active = TRUE
@@ -235,7 +245,8 @@ def api_key_required(f):
                 app.logger.error(f"Invalid or inactive API key provided: {api_key}")
                 return jsonify({
                     'error': 'Invalid or inactive API key',
-                    'message': 'The provided API key is not valid or has been deactivated'
+                    'message': 'The provided API key is not valid or has been deactivated',
+                    'key_checked': api_key
                 }), 401
                 
             # Store user_id in g for the request
@@ -250,10 +261,11 @@ def api_key_required(f):
             conn.commit()
             
         except Exception as e:
-            app.logger.error(f"Error verifying API key: {e}")
+            app.logger.error(f"Error verifying API key: {str(e)}")
             return jsonify({
                 'error': 'Internal server error',
-                'message': 'An error occurred while verifying your API key'
+                'message': str(e),
+                'type': type(e).__name__
             }), 500
         finally:
             if conn:
@@ -637,84 +649,14 @@ def get_api_key():
             conn.close()
             
 @app.route('/api/use_service', methods=['POST'])
-@limiter.limit("10 per minute")
 @api_key_required
 def use_service():
-    # Ensure the request is JSON
-    if not request.is_json:
-        return jsonify({
-            'error': 'Unsupported Media Type',
-            'message': 'Request must be JSON'
-        }), 415
-
-    user_id = g.api_user_id
-    points_to_deduct = 10
-    
-    conn = None
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        
-        # Check if user has enough points
-        cur.execute('SELECT points FROM user_points WHERE user_id = %s', (user_id,))
-        user_points = cur.fetchone()
-        
-        if not user_points:
-            return jsonify({
-                'status': 'error',
-                'message': 'User points record not found',
-                'code': 'user_not_found'
-            }), 404
-            
-        if user_points[0] < points_to_deduct:
-            return jsonify({
-                'status': 'error',
-                'message': f'Insufficient points. You need at least {points_to_deduct} points to use this service.',
-                'required_points': points_to_deduct,
-                'current_points': user_points[0],
-                'code': 'insufficient_points'
-            }), 402  # 402 Payment Required
-        
-        # Deduct points
-        new_points = user_points[0] - points_to_deduct
-        cur.execute('''
-            UPDATE user_points 
-            SET points = %s 
-            WHERE user_id = %s
-        ''', (new_points, user_id))
-        
-        # Log the event
-        cur.execute('''
-            INSERT INTO user_events (user_id, event_type, event_data, created_at)
-            VALUES (%s, %s, %s, NOW())
-        ''', (user_id, 'points_deducted', json.dumps({
-            'service': 'use_service',
-            'points_deducted': points_to_deduct,
-            'remaining_points': new_points
-        })))
-        
-        conn.commit()
-        
-        return jsonify({
-            'status': 'success',
-            'message': f'Successfully used service. {points_to_deduct} points deducted.',
-            'points_deducted': points_to_deduct,
-            'remaining_points': new_points,
-            'timestamp': datetime.now().isoformat()
-        })
-        
-    except Exception as e:
-        app.logger.error(f"Error in use_service endpoint for user {user_id}: {e}")
-        if conn:
-            conn.rollback()
-        return jsonify({
-            'error': 'Internal Server Error',
-            'message': 'An error occurred while processing your request',
-            'code': 'server_error'
-        }), 500
-    finally:
-        if conn:
-            conn.close()
+    # Minimal endpoint to test if it works
+    return jsonify({
+        'status': 'success',
+        'message': 'API is working',
+        'user_id': g.api_user_id
+    })
             
 @app.route('/api/check_balance', methods=['GET'])
 @api_key_required
