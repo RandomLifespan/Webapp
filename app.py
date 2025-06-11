@@ -651,51 +651,82 @@ def get_api_key():
             conn.close()
             
 @app.route('/api/use_service', methods=['POST'])
+@limiter.limit("10 per minute")
 @api_key_required
 def use_service():
-    # Minimal endpoint to test if it works
-    return jsonify({
-        'status': 'success',
-        'message': 'API is working',
-        'user_id': g.api_user_id
-    })
-            
-@app.route('/api/check_balance', methods=['GET'])
-@api_key_required
-def check_balance():
     user_id = g.api_user_id
+    points_to_deduct = 10  # Points to deduct per request
     
     conn = None
     try:
         conn = get_db_connection()
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur = conn.cursor()
         
-        cur.execute('''
-            SELECT points FROM user_points 
-            WHERE user_id = %s
-        ''', (user_id,))
+        # 1. Check user's current points
+        cur.execute('SELECT points FROM user_points WHERE user_id = %s FOR UPDATE', (user_id,))
+        user_points = cur.fetchone()
         
-        points_data = cur.fetchone()
-        
-        if points_data:
+        if not user_points:
             return jsonify({
-                'status': 'success',
-                'points': points_data['points']
-            })
-        else:
-            return jsonify({
-                'status': 'success',
-                'points': 0,
-                'message': 'No points record found'
-            })
+                'status': 'error',
+                'code': 'no_points_record',
+                'message': 'User points record not found'
+            }), 404
             
+        current_points = user_points[0]
+        
+        # 2. Verify sufficient points
+        if current_points < points_to_deduct:
+            return jsonify({
+                'status': 'error',
+                'code': 'insufficient_points',
+                'message': f'You need at least {points_to_deduct} points to use this service',
+                'required_points': points_to_deduct,
+                'current_points': current_points
+            }), 402  # 402 Payment Required
+        
+        # 3. Deduct points
+        new_points = current_points - points_to_deduct
+        cur.execute('''
+            UPDATE user_points 
+            SET points = %s 
+            WHERE user_id = %s
+        ''', (new_points, user_id))
+        
+        # 4. Log the transaction
+        cur.execute('''
+            INSERT INTO user_events (user_id, event_type, event_data, created_at)
+            VALUES (%s, %s, %s, NOW())
+        ''', (user_id, 'points_deducted', json.dumps({
+            'service': 'api_use_service',
+            'points_deducted': points_to_deduct,
+            'remaining_points': new_points,
+            'endpoint': '/api/use_service'
+        })))
+        
+        conn.commit()
+        
+        # 5. Return success response
+        return jsonify({
+            'status': 'success',
+            'message': f'Successfully used service. {points_to_deduct} points deducted.',
+            'points_deducted': points_to_deduct,
+            'remaining_points': new_points,
+            'timestamp': datetime.now().isoformat()
+        })
+        
     except Exception as e:
-        app.logger.error(f"Error checking balance for user {user_id}: {e}")
-        return jsonify({'error': str(e)}), 500
+        app.logger.error(f"Error in use_service for user {user_id}: {str(e)}")
+        if conn:
+            conn.rollback()
+        return jsonify({
+            'status': 'error',
+            'code': 'server_error',
+            'message': 'Internal server error'
+        }), 500
     finally:
         if conn:
             conn.close()
-            
 # --- Admin Panel Routes ---
 
 @app.route('/admin') # <--- This is the URL that will display admin.html
