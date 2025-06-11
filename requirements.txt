@@ -7,3 +7,4 @@ Flask-Cors==4.0.0
 Flask-WTF
 Flask-Talisman
 Flask-Limiter
+Werkzeug
