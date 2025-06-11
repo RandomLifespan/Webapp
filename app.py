@@ -829,33 +829,35 @@ def admin_users():
         search_query = request.args.get('query', '').strip()
         sort_by = request.args.get('sort', 'recent') # 'recent', 'oldest', 'most_interactions'
 
-        sql_query = "SELECT * FROM users"
+        sql_query = """
+            SELECT u.*, COALESCE(up.points, 0) as points 
+            FROM users u
+            LEFT JOIN user_points up ON u.user_id = up.user_id
+        """
         params = []
 
         if search_query:
-            # Ensure user_id is cast to text for ILIKE comparison
-            sql_query += " WHERE user_id::text ILIKE %s OR username ILIKE %s"
+            sql_query += " WHERE u.user_id::text ILIKE %s OR u.username ILIKE %s"
             params.append(f"%{search_query}%")
             params.append(f"%{search_query}%")
 
         if sort_by == 'recent':
-            sql_query += " ORDER BY last_seen DESC"
+            sql_query += " ORDER BY u.last_seen DESC"
         elif sort_by == 'oldest':
-            sql_query += " ORDER BY created_at ASC"
+            sql_query += " ORDER BY u.created_at ASC"
         elif sort_by == 'most_interactions':
-            sql_query += " ORDER BY interactions DESC"
+            sql_query += " ORDER BY u.interactions DESC"
         else: # Default to recent if invalid sort_by
-            sql_query += " ORDER BY last_seen DESC"
+            sql_query += " ORDER BY u.last_seen DESC"
 
-        sql_query += " LIMIT 100" # Still limit for performance on the main page
+        sql_query += " LIMIT 100"
 
         cur.execute(sql_query, params)
         users = cur.fetchall()
 
-        # Convert datetime objects to ISO 8601 strings
         serialized_users = []
         for user in users:
-            user_dict = dict(user) # Convert RealDictRow to dict
+            user_dict = dict(user)
             if user_dict.get('created_at'):
                 user_dict['created_at'] = user_dict['created_at'].isoformat()
             if user_dict.get('last_seen'):
@@ -871,6 +873,7 @@ def admin_users():
         if conn:
             conn.close()
 
+
 @app.route('/admin/user/<int:user_id>')
 @require_admin_auth
 def get_user_profile(user_id):
@@ -878,16 +881,30 @@ def get_user_profile(user_id):
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        
+        # Get user data
         cur.execute('SELECT * FROM users WHERE user_id = %s', (user_id,))
         user = cur.fetchone()
-        if user:
-            user_dict = dict(user)
-            if user_dict.get('created_at'):
-                user_dict['created_at'] = user_dict['created_at'].isoformat()
-            if user_dict.get('last_seen'):
-                user_dict['last_seen'] = user_dict['last_seen'].isoformat()
-            return jsonify(user_dict)
-        return jsonify({'error': 'User not found'}), 404
+        
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+            
+            # Get points data
+        cur.execute('SELECT points, last_generated_at FROM user_points WHERE user_id = %s', (user_id,))
+        points_data = cur.fetchone()
+        
+        user_dict = dict(user)
+        if user_dict.get('created_at'):
+            user_dict['created_at'] = user_dict['created_at'].isoformat()
+        if user_dict.get('last_seen'):
+            user_dict['last_seen'] = user_dict['last_seen'].isoformat()
+            
+        # Add points data to response
+        user_dict['points'] = points_data['points'] if points_data else 0
+        user_dict['last_generated_at'] = points_data['last_generated_at'].isoformat() if points_data and points_data['last_generated_at'] else None
+        
+        return jsonify(user_dict)
+        
     except Exception as e:
         app.logger.error(f"Error fetching user profile for {user_id}: {e}")
         return jsonify({'error': str(e)}), 500
