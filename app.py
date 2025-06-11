@@ -25,17 +25,22 @@ app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['TELEGRAM_BOT_TOKEN'] = os.environ.get('TELEGRAM_BOT_TOKEN', '')
 app.config['SESSION_COOKIE_NAME'] = 'admin_session' 
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7) 
-
-# Enable CSRF protection for forms. This makes csrf_token() available in templates.
-# app.config['WTF_CSRF_ENABLED'] = True # Explicitly enable CSRF
-
-
 app.config['WTF_CSRF_CHECK_DEFAULT'] = False
 
 csrf = CSRFProtect(app) # Initialize CSRFProtect
 csrf._exempt_views.add('api.use_service')
 
-limiter = Limiter(
+REDIS_URL = os.environ.get("REDIS_URL")
+if REDIS_URL:
+    limiter = Limiter(
+        key_func=get_remote_address,
+        default_limits=["200 per day", "50 per hour"],
+        storage_uri=REDIS_URL,
+        app=app
+    )
+    print(f"Flask-Limiter configured with Redis: {REDIS_URL}")
+else:
+    limiter = Limiter(
     app=app,
     key_func=get_remote_address,
     default_limits=["200 per day", "50 per hour"]
