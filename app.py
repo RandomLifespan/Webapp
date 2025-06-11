@@ -113,9 +113,25 @@ def init_db():
             id SERIAL PRIMARY KEY,
             user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
             api_key TEXT NOT NULL UNIQUE,
+            api_secret TEXT NOT NULL,  # For request signing
+            allowed_ips CIDR[],  # IP whitelist
             created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
             last_used_at TIMESTAMP WITHOUT TIME ZONE,
-            is_active BOOLEAN DEFAULT TRUE
+            expires_at TIMESTAMP WITHOUT TIME ZONE,
+            is_active BOOLEAN DEFAULT TRUE,
+            rate_limit INTEGER DEFAULT 10,  # Requests per minute
+            usage_count INTEGER DEFAULT 0
+        );
+        ''')
+        cur.execute('''
+        CREATE TABLE IF NOT EXISTS api_key_usage (
+            id SERIAL PRIMARY KEY,
+            api_key_id INTEGER REFERENCES user_api_keys(id),
+            ip_address INET,
+            user_agent TEXT,
+            endpoint TEXT,
+            status_code INTEGER,
+            created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
         );
         ''')
         conn.commit()
@@ -213,67 +229,138 @@ def check_admin_credentials(username, password):
 def api_key_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
-        # Debug: Print all headers
-        app.logger.info(f"Incoming headers: {dict(request.headers)}")
+        # Get client information
+        client_ip = request.remote_addr
+        user_agent = request.headers.get('User-Agent', '')
+        endpoint = request.path
         
+        # Verify API key exists
         api_key = request.headers.get('X-API-Key')
         if not api_key:
-            app.logger.error("API key is missing from headers")
-            return jsonify({
-                'error': 'API key is missing',
-                'message': 'Please include your API key in the X-API-Key header'
-            }), 401
+            log_api_attempt(None, client_ip, user_agent, endpoint, 401)
+            return jsonify({'error': 'API key required'}), 401
 
-        # Debug: Print the API key
-        app.logger.info(f"Received API key: {api_key}")
-        
         conn = None
         try:
             conn = get_db_connection()
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
             
-            # Debug: Print the query being executed
-            app.logger.info(f"Executing query for API key: {api_key}")
-            
+            # Get API key details with FOR UPDATE lock
             cur.execute('''
-                SELECT user_id FROM user_api_keys 
-                WHERE api_key = %s AND is_active = TRUE
+                SELECT * FROM user_api_keys 
+                WHERE api_key = %s AND is_active = TRUE 
+                AND (expires_at IS NULL OR expires_at > NOW())
+                FOR UPDATE
             ''', (api_key,))
             
             api_key_data = cur.fetchone()
             
             if not api_key_data:
-                app.logger.error(f"Invalid or inactive API key provided: {api_key}")
-                return jsonify({
-                    'error': 'Invalid or inactive API key',
-                    'message': 'The provided API key is not valid or has been deactivated',
-                    'key_checked': api_key
-                }), 401
+                log_api_attempt(None, client_ip, user_agent, endpoint, 401)
+                return jsonify({'error': 'Invalid or expired API key'}), 401
                 
-            # Store user_id in g for the request
-            g.api_user_id = api_key_data['user_id']
-            
-            # Update last used timestamp
+            # Check rate limiting
+            if api_key_data['usage_count'] >= api_key_data['rate_limit']:
+                log_api_attempt(api_key_data['id'], client_ip, user_agent, endpoint, 429)
+                return jsonify({
+                    'error': 'Rate limit exceeded',
+                    'limit': api_key_data['rate_limit'],
+                    'reset_in': '1 minute'
+                }), 429
+                
+            # IP whitelist check
+            if api_key_data['allowed_ips']:
+                ip_allowed = False
+                for allowed_ip in api_key_data['allowed_ips']:
+                    if ipaddress.ip_address(client_ip) in ipaddress.ip_network(allowed_ip):
+                        ip_allowed = True
+                        break
+                if not ip_allowed:
+                    log_api_attempt(api_key_data['id'], client_ip, user_agent, endpoint, 403)
+                    return jsonify({'error': 'IP not authorized'}), 403
+                    
+            # Request signing verification
+            if request.method in ['POST', 'PUT', 'PATCH', 'DELETE']:
+                received_signature = request.headers.get('X-API-Signature')
+                timestamp = request.headers.get('X-API-Timestamp')
+                
+                if not received_signature or not timestamp:
+                    log_api_attempt(api_key_data['id'], client_ip, user_agent, endpoint, 401)
+                    return jsonify({'error': 'Signature and timestamp required'}), 401
+                    
+                # Verify timestamp is recent (prevent replay attacks)
+                if (datetime.now() - datetime.fromtimestamp(int(timestamp))) > timedelta(minutes=5):
+                    log_api_attempt(api_key_data['id'], client_ip, user_agent, endpoint, 401)
+                    return jsonify({'error': 'Expired timestamp'}), 401
+                    
+                # Verify signature
+                payload = request.get_data()
+                expected_signature = hmac.new(
+                    api_key_data['api_secret'].encode(),
+                    f"{timestamp}:{payload.decode()}".encode(),
+                    hashlib.sha256
+                ).hexdigest()
+                
+                if not hmac.compare_digest(expected_signature, received_signature):
+                    log_api_attempt(api_key_data['id'], client_ip, user_agent, endpoint, 401)
+                    return jsonify({'error': 'Invalid signature'}), 401
+                    
+            # Update usage stats
             cur.execute('''
                 UPDATE user_api_keys 
-                SET last_used_at = NOW() 
-                WHERE api_key = %s
-            ''', (api_key,))
+                SET 
+                    last_used_at = NOW(),
+                    usage_count = usage_count + 1
+                WHERE id = %s
+            ''', (api_key_data['id'],))
+            
+            # Reset counter if last update was >1 minute ago
+            cur.execute('''
+                UPDATE user_api_keys 
+                SET usage_count = 1
+                WHERE id = %s AND last_used_at < NOW() - INTERVAL '1 minute'
+            ''', (api_key_data['id'],))
+            
+            # Store user_id and key info in g for the request
+            g.api_user_id = api_key_data['user_id']
+            g.api_key_info = api_key_data
+            
             conn.commit()
             
+            # Proceed with the request
+            response = f(*args, **kwargs)
+            
+            # Log successful request
+            log_api_attempt(api_key_data['id'], client_ip, user_agent, endpoint, response.status_code)
+            
+            return response
+            
         except Exception as e:
-            app.logger.error(f"Error verifying API key: {str(e)}")
-            return jsonify({
-                'error': 'Internal server error',
-                'message': str(e),
-                'type': type(e).__name__
-            }), 500
+            app.logger.error(f"API key verification error: {str(e)}")
+            if conn:
+                conn.rollback()
+            return jsonify({'error': 'Internal server error'}), 500
         finally:
             if conn:
                 conn.close()
-                
-        return f(*args, **kwargs)
     return decorated
+
+def log_api_attempt(api_key_id, ip, user_agent, endpoint, status_code):
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute('''
+            INSERT INTO api_key_usage 
+            (api_key_id, ip_address, user_agent, endpoint, status_code)
+            VALUES (%s, %s, %s, %s, %s)
+        ''', (api_key_id, ip, user_agent, endpoint, status_code))
+        conn.commit()
+    except Exception as e:
+        app.logger.error(f"Error logging API attempt: {str(e)}")
+    finally:
+        if conn:
+            conn.close()
 
 # Modified require_admin_auth to use session
 def require_admin_auth(f):
@@ -562,8 +649,12 @@ def generate_api_key():
     user_id = g.telegram_user['id']
     now = datetime.now()
     
-    # Generate a random API key
+    # Generate random key and secret
     api_key = secrets.token_urlsafe(32)
+    api_secret = secrets.token_urlsafe(64)  # For request signing
+    
+    # Default to 30-day expiration
+    expires_at = now + timedelta(days=30)
     
     conn = None
     try:
@@ -577,24 +668,30 @@ def generate_api_key():
             WHERE user_id = %s AND is_active = TRUE
         ''', (user_id,))
         
-        # Insert the new key
+        # Insert the new key with enhanced security
         cur.execute('''
-            INSERT INTO user_api_keys (user_id, api_key, created_at)
-            VALUES (%s, %s, %s)
-        ''', (user_id, api_key, now))
+            INSERT INTO user_api_keys 
+            (user_id, api_key, api_secret, created_at, expires_at)
+            VALUES (%s, %s, %s, %s, %s)
+        ''', (user_id, api_key, api_secret, now, expires_at))
         
         # Log the event
         cur.execute('''
             INSERT INTO user_events (user_id, event_type, event_data, created_at)
             VALUES (%s, %s, %s, %s)
-        ''', (user_id, 'api_key_generated', json.dumps({'action': 'generate'}), now))
+        ''', (user_id, 'api_key_generated', json.dumps({
+            'action': 'generate',
+            'expires_at': expires_at.isoformat()
+        }), now))
         
         conn.commit()
         
         return jsonify({
             'status': 'success',
             'api_key': api_key,
-            'message': 'New API key generated successfully. Any previous keys have been deactivated.'
+            'api_secret': api_secret,  # Only returned once!
+            'expires_at': expires_at.isoformat(),
+            'message': 'New API key generated. Previous keys deactivated.'
         })
         
     except Exception as e:
@@ -605,6 +702,7 @@ def generate_api_key():
     finally:
         if conn:
             conn.close()
+            
 
 @app.route('/get_api_key', methods=['GET'])
 def get_api_key():
@@ -723,6 +821,179 @@ def use_service():
             'code': 'server_error',
             'message': 'Internal server error'
         }), 500
+    finally:
+        if conn:
+            conn.close()
+
+@app.route('/api/use_service', methods=['POST'])
+@limiter.limit("100 per day;10 per minute")  # Global rate limit
+@api_key_required
+def use_service():
+    user_id = g.api_user_id
+    points_to_deduct = 10
+    
+    # Check for suspicious activity
+    if detect_suspicious_activity(g.api_key_info['id']):
+        return jsonify({
+            'error': 'Suspicious activity detected',
+            'message': 'Your account has been temporarily restricted'
+        }), 403
+    
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        # Check points with row locking
+        cur.execute('''
+            SELECT points FROM user_points 
+            WHERE user_id = %s FOR UPDATE
+        ''', (user_id,))
+        user_points = cur.fetchone()
+        
+        if not user_points:
+            return jsonify({
+                'status': 'error',
+                'code': 'no_points_record',
+                'message': 'User points record not found'
+            }), 404
+            
+        current_points = user_points[0]
+        
+        if current_points < points_to_deduct:
+            return jsonify({
+                'status': 'error',
+                'code': 'insufficient_points',
+                'message': f'Need {points_to_deduct} points',
+                'required': points_to_deduct,
+                'available': current_points
+            }), 402
+        
+        # Deduct points
+        new_points = current_points - points_to_deduct
+        cur.execute('''
+            UPDATE user_points 
+            SET points = %s 
+            WHERE user_id = %s
+        ''', (new_points, user_id))
+        
+        # Log transaction
+        cur.execute('''
+            INSERT INTO user_events (user_id, event_type, event_data, created_at)
+            VALUES (%s, %s, %s, NOW())
+        ''', (user_id, 'points_deducted', json.dumps({
+            'service': 'api_use_service',
+            'points_deducted': points_to_deduct,
+            'remaining_points': new_points,
+            'client_ip': request.remote_addr
+        })))
+        
+        conn.commit()
+        
+        return jsonify({
+            'status': 'success',
+            'points_deducted': points_to_deduct,
+            'remaining_points': new_points,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error in use_service: {str(e)}")
+        if conn:
+            conn.rollback()
+        return jsonify({'error': 'Internal server error'}), 500
+    finally:
+        if conn:
+            conn.close()
+
+def detect_suspicious_activity(api_key_id):
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        
+        # Check for multiple IPs in short time
+        cur.execute('''
+            SELECT COUNT(DISTINCT ip_address) as ip_count 
+            FROM api_key_usage 
+            WHERE api_key_id = %s 
+            AND created_at > NOW() - INTERVAL '1 hour'
+        ''', (api_key_id,))
+        ip_count = cur.fetchone()['ip_count']
+        
+        # Check for failed attempts
+        cur.execute('''
+            SELECT COUNT(*) as fail_count 
+            FROM api_key_usage 
+            WHERE api_key_id = %s 
+            AND status_code >= 400 
+            AND created_at > NOW() - INTERVAL '10 minutes'
+        ''', (api_key_id,))
+        fail_count = cur.fetchone()['fail_count']
+        
+        return ip_count > 3 or fail_count > 5
+        
+    except Exception as e:
+        app.logger.error(f"Error detecting suspicious activity: {str(e)}")
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+@app.route('/admin/api_keys', methods=['GET'])
+@require_admin_auth
+def list_api_keys():
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        
+        cur.execute('''
+            SELECT k.*, u.username, u.first_name 
+            FROM user_api_keys k
+            LEFT JOIN users u ON k.user_id = u.user_id
+            ORDER BY k.created_at DESC
+            LIMIT 100
+        ''')
+        
+        keys = []
+        for row in cur.fetchall():
+            key = dict(row)
+            key['created_at'] = key['created_at'].isoformat() if key['created_at'] else None
+            key['last_used_at'] = key['last_used_at'].isoformat() if key['last_used_at'] else None
+            key['expires_at'] = key['expires_at'].isoformat() if key['expires_at'] else None
+            keys.append(key)
+            
+        return jsonify(keys)
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if conn:
+            conn.close()
+
+@app.route('/admin/api_key/<int:key_id>', methods=['DELETE'])
+@require_admin_auth
+def revoke_api_key(key_id):
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        cur.execute('''
+            UPDATE user_api_keys 
+            SET is_active = FALSE 
+            WHERE id = %s
+        ''', (key_id,))
+        
+        conn.commit()
+        
+        return jsonify({'message': 'API key revoked'})
+        
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        return jsonify({'error': str(e)}), 500
     finally:
         if conn:
             conn.close()
