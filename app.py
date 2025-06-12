@@ -407,7 +407,7 @@ def generate_points():
     conn = None
     try:
         conn = get_db_connection()
-        cur = conn.cursor()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         
         cur.execute('''
             SELECT * FROM user_sessions 
@@ -421,11 +421,11 @@ def generate_points():
                 'message': 'Invalid or expired session token'
             }), 401
             
-        additional_data = token_data.get('additional_data', {})
+        additional_data = token_data['additional_data'] if 'additional_data' in token_data else {}
         if isinstance(additional_data, str):
             try:
                 additional_data = json.loads(additional_data)
-            except:
+            except json.JSONDecodeError:
                 additional_data = {}
         
         # Check if token was generated through the webapp
@@ -435,8 +435,8 @@ def generate_points():
                 'message': 'Invalid token source'
             }), 403
 
-        generated_at = datetime.fromisoformat(additional_data.get('generated_at', '1970-01-01'))
-        if (now - generated_at) > timedelta(minutes=2):
+        token_created_at = token_data['created_at']
+        if (now - token_created_at) > timedelta(minutes=2):
             return jsonify({
                 'status': 'error',
                 'message': 'Token expired'
@@ -876,7 +876,7 @@ def get_session_token():
     conn = None
     try:
         conn = get_db_connection()
-        cur = conn.cursor()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor) 
 
         # Clean up old tokens for this user
         cur.execute('DELETE FROM user_sessions WHERE user_id = %s AND last_activity < NOW()', (user_id,))
