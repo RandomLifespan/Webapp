@@ -8,3 +8,4 @@ Flask-WTF
 Flask-Talisman
 Flask-Limiter[redis]
 Werkzeug
+redis
