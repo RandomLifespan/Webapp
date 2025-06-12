@@ -89,6 +89,7 @@ def init_db():
             referrer TEXT,
             created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
             last_activity TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+            additional_data JSONB,
             FOREIGN KEY (user_id) REFERENCES users (user_id) ON DELETE CASCADE
         );
         ''')
