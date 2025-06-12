@@ -367,6 +367,10 @@ def generate_points():
     if not hasattr(g, 'telegram_user') or not g.telegram_user:
         return jsonify({'error': 'Unauthorized: Telegram user data not found.'}), 401
 
+    session_token = request.headers.get('X-Session-Token')
+    if not session_token:
+        return jsonify({'error': 'Session token required'}), 400
+    
     user_id = g.telegram_user['id']
     now = datetime.now()
     cooldown_duration = timedelta(minutes=5) # 5 minutes cooldown
@@ -375,7 +379,43 @@ def generate_points():
     try:
         conn = get_db_connection()
         cur = conn.cursor()
+        
+        cur.execute('''
+            SELECT * FROM user_sessions 
+            WHERE session_id = %s AND user_id = %s AND last_activity > %s
+        ''', (session_token, user_id, now))
+        
+        token_data = cur.fetchone()
+        if not token_data:
+            return jsonify({
+                'status': 'error',
+                'message': 'Invalid or expired session token'
+            }), 401
+            
+        additional_data = token_data.get('additional_data', {})
+        if isinstance(additional_data, str):
+            try:
+                additional_data = json.loads(additional_data)
+            except:
+                additional_data = {}
+        
+        # Check if token was generated through the webapp
+        if additional_data.get('source') != 'webapp':
+            return jsonify({
+                'status': 'error',
+                'message': 'Invalid token source'
+            }), 403
 
+        generated_at = datetime.fromisoformat(additional_data.get('generated_at', '1970-01-01'))
+        if (now - generated_at) > timedelta(minutes=2):
+            return jsonify({
+                'status': 'error',
+                'message': 'Token expired'
+            }), 403
+
+        # Delete the token immediately after validation
+        cur.execute('DELETE FROM user_sessions WHERE session_id = %s', (session_token,))
+        
         # Fetch current points and last generated time
         cur.execute("SELECT points, last_generated_at FROM user_points WHERE user_id = %s", (user_id,))
         user_points_data = cur.fetchone()
@@ -778,6 +818,76 @@ def use_service():
     finally:
         if conn:
             conn.close()
+
+
+
+
+@app.route('/get_session_token', methods=['POST'])
+@limiter.limit("5 per minute")  # Strict rate limiting
+def get_session_token():
+    if not hasattr(g, 'telegram_user') or not g.telegram_user:
+        return jsonify({'error': 'Unauthorized: Telegram user data not found.'}), 401
+
+    # Validate this is coming from a real Telegram WebApp
+    if not request.headers.get('X-Telegram-Init-Data'):
+        return jsonify({'error': 'Invalid request source'}), 403
+
+    # Validate the request contains required data
+    try:
+        data = request.get_json()
+        if not data or data.get('action') != 'request_token':
+            return jsonify({'error': 'Invalid request format'}), 400
+    except:
+        return jsonify({'error': 'Invalid JSON data'}), 400
+
+    user_id = g.telegram_user['id']
+    token = secrets.token_urlsafe(32)
+    expires_at = datetime.now() + timedelta(minutes=2)  # Shorter expiration
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # Clean up old tokens for this user
+        cur.execute('DELETE FROM user_sessions WHERE user_id = %s AND last_activity < NOW()', (user_id,))
+
+        # Store the new token with additional metadata
+        cur.execute('''
+            INSERT INTO user_sessions 
+            (session_id, user_id, ip_address, user_agent, created_at, last_activity, additional_data)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        ''', (
+            token,
+            user_id,
+            request.headers.get('X-Forwarded-For', request.remote_addr),
+            request.headers.get('User-Agent'),
+            datetime.now(),
+            expires_at,
+            json.dumps({
+                'generated_at': datetime.now().isoformat(),
+                'action': 'points_generation',
+                'source': 'webapp'
+            })
+        ))
+
+        conn.commit()
+
+        return jsonify({
+            'status': 'success',
+            'token': token,
+            'expires_at': expires_at.isoformat()
+        })
+
+    except Exception as e:
+        app.logger.error(f"Error generating session token for user {user_id}: {e}")
+        if conn:
+            conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if conn:
+            conn.close()
+            
 # --- Admin Panel Routes ---
 
 @app.route('/admin') # <--- This is the URL that will display admin.html
