@@ -712,6 +712,50 @@
                 setTimeout(updateCooldownTimer, 1000);
             }
         }
+        
+    let sessionToken = null;
+    let isGeneratingToken = false;
+
+    // Modified to only fetch token when button is clicked
+    async function fetchSessionToken() {
+        if (isGeneratingToken) return;
+        isGeneratingToken = true;
+        
+        try {
+            const initData = Telegram.WebApp.initData;
+            const response = await fetch('/get_session_token', {
+                method: 'POST',  // Changed to POST
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Telegram-Init-Data': initData,
+                    'X-CSRFToken': csrfToken
+                },
+                body: JSON.stringify({
+                    action: 'request_token',
+                    timestamp: Date.now()
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to get session token');
+            }
+
+            const data = await response.json();
+            if (data.status === 'success') {
+                sessionToken = data.token;
+                // Set token to expire after 2 minutes (shorter window)
+                setTimeout(() => {
+                    sessionToken = null;
+                }, 2 * 60 * 1000);
+                return true;
+            }
+        } catch (error) {
+            console.error('Error fetching session token:', error);
+            return false;
+        } finally {
+            isGeneratingToken = false;
+        }
+    }
 
 
 // Function to fetch current API key
@@ -851,6 +895,12 @@
 
         // --- Handle Points Generation Function ---
         async function handleGeneratePoints() {
+            const gotToken = await fetchSessionToken();
+            if (!gotToken || !sessionToken) {
+                showStatusMessage('Please try generating points again', 'error');
+                return;
+            }
+
             generatePointsButton.disabled = true;
             showStatusMessage('Generating points...', 'loading');
             try {
@@ -860,8 +910,13 @@
                     headers: {
                         'Content-Type': 'application/json',
                         'X-Telegram-Init-Data': initData ,
-                        'X-CSRFToken': csrfToken
-                    }
+                        'X-CSRFToken': csrfToken ,
+                        'X-Session-Token': sessionToken
+                    },
+                    body: JSON.stringify({
+                    action: 'generate_points',
+                    timestamp: Date.now()
+                })
                 });
 
                 if (!response.ok) {
