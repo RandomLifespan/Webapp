@@ -59,34 +59,6 @@ def get_db_connection():
         app.logger.error(f"Error connecting to PostgreSQL database: {e}")
         raise
         
-def migrate_db():
-    conn = None
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        
-        # Check if column exists
-        cur.execute('''
-        SELECT column_name 
-        FROM information_schema.columns 
-        WHERE table_name='user_sessions' AND column_name='additional_data'
-        ''')
-        
-        if not cur.fetchone():
-            # Add the column if it doesn't exist
-            cur.execute('ALTER TABLE user_sessions ADD COLUMN additional_data JSONB')
-            app.logger.info("Added additional_data column to user_sessions table")
-        
-        conn.commit()
-    except Exception as e:
-        app.logger.error(f"Database migration failed: {e}")
-        if conn:
-            conn.rollback()
-        raise
-    finally:
-        if conn:
-            conn.close()
-            
 def init_db():
     conn = None
     try:
@@ -163,7 +135,6 @@ def init_db():
 
 # Call init_db during application startup
 init_db()
-migrate_db()
 
 
 # --- Security helper functions ---
