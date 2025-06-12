@@ -9,6 +9,7 @@ import hmac
 import secrets
 import urllib.parse
 import json
+import redis
 from flask_wtf.csrf import CSRFProtect, generate_csrf # Import CSRFProtect and generate_csrf
 from werkzeug.security import generate_password_hash, check_password_hash # Import for password hashing
 from flask_limiter import Limiter
